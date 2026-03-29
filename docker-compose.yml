@@ -1,0 +1,47 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: voice-chat-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    # GPU support (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: voice-chat-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_data:/app/data
+      - whisper_cache:/root/.cache
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2:1b
+      - WHISPER_MODEL_SIZE=base
+      - DB_PATH=/app/data/voice_chat.db
+      # Add your OpenAI API key here for GPT models (optional — leave empty for local-only)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=gpt-4o-mini
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+    name: voice-chat-ollama-data
+  app_data:
+    name: voice-chat-app-data
+  whisper_cache:
+    name: voice-chat-whisper-cache
