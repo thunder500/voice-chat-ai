@@ -89,6 +89,24 @@ async def get_conversations():
         return [dict(r) for r in await cursor.fetchall()]
 
 
+async def search_conversations(query: str):
+    """Search conversations by title or message content using LIKE queries."""
+    pattern = f"%{query}%"
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT DISTINCT c.id, c.title, c.created_at
+            FROM conversations c
+            LEFT JOIN messages m ON m.conversation_id = c.id
+            WHERE c.title LIKE ? OR m.content LIKE ?
+            ORDER BY c.created_at DESC
+            """,
+            (pattern, pattern),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
 async def clear_conversations():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM messages")

@@ -16,6 +16,7 @@ from faster_whisper import WhisperModel
 from database import (
     init_db, create_conversation, add_message, update_conversation_title,
     get_conversations, get_conversation_messages, clear_conversations,
+    search_conversations,
     add_knowledge, get_all_knowledge, delete_knowledge, search_knowledge,
     get_personas, get_persona, add_persona, delete_persona,
 )
@@ -141,6 +142,13 @@ async def health():
 @app.get("/api/conversations")
 async def list_conversations():
     return JSONResponse(content=await get_conversations())
+
+
+@app.get("/api/conversations/search")
+async def search_convs(q: str = ""):
+    if not q.strip():
+        return JSONResponse(content=await get_conversations())
+    return JSONResponse(content=await search_conversations(q.strip()))
 
 
 @app.get("/api/conversations/{cid}")

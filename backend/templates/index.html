@@ -124,13 +124,18 @@
         .sidebar.open{transform:translateX(0)}
         .sidebar-hdr{padding:14px;border-bottom:1px solid #1a1a2e;display:flex;justify-content:space-between;align-items:center}
         .sidebar-hdr h3{font-size:14px}
+        .sidebar-search{padding:8px 10px;border-bottom:1px solid #1a1a2e}
+        .sidebar-search input{width:100%;background:#111;border:1px solid #2a2a3e;color:#e0e0e0;padding:6px 10px;border-radius:6px;font-size:12px;outline:none}
+        .sidebar-search input:focus{border-color:#8b5cf6}
         .conv-list{flex:1;overflow-y:auto;padding:6px}
         .conv-item{padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px}
         .conv-item:hover{background:#1a1a2e}
         .conv-item.active{background:#1a1a2e;color:#8b5cf6}
         .conv-item-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .conv-item-title mark{background:none;color:#f59e0b;font-weight:600}
         .conv-dl{color:#555;font-size:10px;background:none;border:none;cursor:pointer;padding:2px 4px;flex-shrink:0;display:none}
         .conv-item:hover .conv-dl,.conv-item.active .conv-dl{display:inline}
+        .conv-empty{padding:20px 10px;font-size:12px;color:#555;text-align:center}
         .sidebar-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
         .sidebar-bg.open{display:block}
     </style>
@@ -186,6 +191,7 @@
     <div class="sidebar-bg" id="sidebarBg" onclick="toggleSidebar()"></div>
     <div class="sidebar" id="sidebar">
         <div class="sidebar-hdr"><h3>Conversations</h3><button class="small-btn" onclick="newConversation()">+ New</button></div>
+        <div class="sidebar-search"><input type="text" id="convSearch" placeholder="Search conversations..." oninput="onConvSearch(this.value)"></div>
         <div class="conv-list" id="convList"></div>
     </div>
 
@@ -863,32 +869,64 @@
     }
 
     // ---- Sidebar ----
-    function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sidebarBg').classList.toggle('open')}
+    function toggleSidebar(){
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('sidebarBg').classList.toggle('open');
+        // Clear search when closing
+        if(!document.getElementById('sidebar').classList.contains('open')){
+            document.getElementById('convSearch').value='';
+            loadConvList();
+        }
+    }
+    function highlightMatch(text, query){
+        if(!query)return escHtml(text);
+        const escaped=query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        return escHtml(text).replace(new RegExp('('+escaped+')','gi'),'<mark>$1</mark>');
+    }
+    function renderConvList(list, query){
+        const el=document.getElementById('convList');el.innerHTML='';
+        if(!list.length){
+            el.innerHTML='<div class="conv-empty">No conversations match</div>';
+            return;
+        }
+        list.forEach(c=>{
+            const d=document.createElement('div');
+            d.className='conv-item'+(c.id===convId?' active':'');
+            d.title='Click to load, double-click to rename';
+            d.onclick=()=>loadConv(c.id);
+            d.ondblclick=(e)=>{
+                e.stopPropagation();
+                const newTitle=prompt('Rename conversation:',c.title);
+                if(newTitle&&newTitle.trim()){
+                    fetch('/api/conversations/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle.trim()})}).then(()=>loadConvList());
+                }
+            };
+            const title=document.createElement('span');
+            title.className='conv-item-title';
+            title.innerHTML=highlightMatch(c.title, query);
+            const dl=document.createElement('button');
+            dl.className='conv-dl';dl.title='Download transcript';dl.textContent='⬇';
+            dl.onclick=(e)=>{e.stopPropagation();window.location='/api/conversations/'+c.id+'/export'};
+            d.appendChild(title);d.appendChild(dl);
+            el.appendChild(d);
+        });
+    }
     async function loadConvList(){
         try{
             const r=await fetch('/api/conversations');const list=await r.json();
-            const el=document.getElementById('convList');el.innerHTML='';
-            list.forEach(c=>{
-                const d=document.createElement('div');
-                d.className='conv-item'+(c.id===convId?' active':'');
-                d.title='Click to load, double-click to rename';
-                d.onclick=()=>loadConv(c.id);
-                d.ondblclick=(e)=>{
-                    e.stopPropagation();
-                    const newTitle=prompt('Rename conversation:',c.title);
-                    if(newTitle&&newTitle.trim()){
-                        fetch('/api/conversations/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle.trim()})}).then(()=>loadConvList());
-                    }
-                };
-                const title=document.createElement('span');
-                title.className='conv-item-title';title.textContent=c.title;
-                const dl=document.createElement('button');
-                dl.className='conv-dl';dl.title='Download transcript';dl.textContent='⬇';
-                dl.onclick=(e)=>{e.stopPropagation();window.location='/api/conversations/'+c.id+'/export'};
-                d.appendChild(title);d.appendChild(dl);
-                el.appendChild(d);
-            });
+            renderConvList(list, '');
         }catch(e){}
+    }
+    let searchDebounce=null;
+    function onConvSearch(q){
+        if(searchDebounce)clearTimeout(searchDebounce);
+        searchDebounce=setTimeout(async()=>{
+            try{
+                const url=q.trim()?'/api/conversations/search?q='+encodeURIComponent(q.trim()):'/api/conversations';
+                const r=await fetch(url);const list=await r.json();
+                renderConvList(list, q.trim());
+            }catch(e){}
+        },200);
     }
     async function loadConv(id){
         try{
