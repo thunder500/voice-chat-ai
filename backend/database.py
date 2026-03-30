@@ -10,9 +10,15 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT DEFAULT 'New Conversation',
+                starred INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migrate: add starred column to existing databases
+        try:
+            await db.execute("ALTER TABLE conversations ADD COLUMN starred INTEGER DEFAULT 0")
+        except Exception:
+            pass  # Column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +91,7 @@ async def update_conversation_title(conversation_id: int, title: str):
 async def get_conversations():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT * FROM conversations ORDER BY created_at DESC")
+        cursor = await db.execute("SELECT * FROM conversations ORDER BY starred DESC, created_at DESC")
         return [dict(r) for r in await cursor.fetchall()]
 
 
@@ -96,15 +102,28 @@ async def search_conversations(query: str):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
-            SELECT DISTINCT c.id, c.title, c.created_at
+            SELECT DISTINCT c.id, c.title, c.starred, c.created_at
             FROM conversations c
             LEFT JOIN messages m ON m.conversation_id = c.id
             WHERE c.title LIKE ? OR m.content LIKE ?
-            ORDER BY c.created_at DESC
+            ORDER BY c.starred DESC, c.created_at DESC
             """,
             (pattern, pattern),
         )
         return [dict(r) for r in await cursor.fetchall()]
+
+
+async def toggle_star_conversation(conversation_id: int) -> bool:
+    """Toggle the starred state of a conversation. Returns the new starred state."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE conversations SET starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END WHERE id = ?",
+            (conversation_id,)
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT starred FROM conversations WHERE id = ?", (conversation_id,))
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
 
 
 async def clear_conversations():

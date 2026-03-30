@@ -135,6 +135,12 @@
         .conv-item-title mark{background:none;color:#f59e0b;font-weight:600}
         .conv-dl{color:#555;font-size:10px;background:none;border:none;cursor:pointer;padding:2px 4px;flex-shrink:0;display:none}
         .conv-item:hover .conv-dl,.conv-item.active .conv-dl{display:inline}
+        .conv-star{color:#555;font-size:12px;background:none;border:none;cursor:pointer;padding:2px 4px;flex-shrink:0;display:none;transition:color .15s}
+        .conv-item:hover .conv-star,.conv-item.active .conv-star{display:inline}
+        .conv-star.starred{display:inline;color:#f59e0b}
+        .conv-star.starred:hover{color:#d97706}
+        .conv-star:not(.starred):hover{color:#f59e0b}
+        .conv-section-label{padding:4px 10px 2px;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.5px}
         .conv-empty{padding:20px 10px;font-size:12px;color:#555;text-align:center}
         .sidebar-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:none}
         .sidebar-bg.open{display:block}
@@ -889,7 +895,9 @@
             el.innerHTML='<div class="conv-empty">No conversations match</div>';
             return;
         }
-        list.forEach(c=>{
+        const starred=list.filter(c=>c.starred);
+        const unstarred=list.filter(c=>!c.starred);
+        function renderItem(c){
             const d=document.createElement('div');
             d.className='conv-item'+(c.id===convId?' active':'');
             d.title='Click to load, double-click to rename';
@@ -901,15 +909,40 @@
                     fetch('/api/conversations/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle.trim()})}).then(()=>loadConvList());
                 }
             };
+            const star=document.createElement('button');
+            star.className='conv-star'+(c.starred?' starred':'');
+            star.title=c.starred?'Unstar':'Star';
+            star.textContent='★';
+            star.onclick=(e)=>{e.stopPropagation();toggleStar(c.id)};
             const title=document.createElement('span');
             title.className='conv-item-title';
             title.innerHTML=highlightMatch(c.title, query);
             const dl=document.createElement('button');
             dl.className='conv-dl';dl.title='Download transcript';dl.textContent='⬇';
             dl.onclick=(e)=>{e.stopPropagation();window.location='/api/conversations/'+c.id+'/export'};
-            d.appendChild(title);d.appendChild(dl);
+            d.appendChild(star);d.appendChild(title);d.appendChild(dl);
             el.appendChild(d);
-        });
+        }
+        if(starred.length){
+            const lbl=document.createElement('div');lbl.className='conv-section-label';lbl.textContent='Starred';
+            el.appendChild(lbl);
+            starred.forEach(renderItem);
+            if(unstarred.length){
+                const lbl2=document.createElement('div');lbl2.className='conv-section-label';lbl2.textContent='All';
+                el.appendChild(lbl2);
+            }
+        }
+        unstarred.forEach(renderItem);
+    }
+    async function toggleStar(id){
+        await fetch('/api/conversations/'+id+'/star',{method:'PATCH'});
+        const q=document.getElementById('convSearch').value.trim();
+        if(q){
+            const r=await fetch('/api/conversations/search?q='+encodeURIComponent(q));
+            renderConvList(await r.json(), q);
+        } else {
+            loadConvList();
+        }
     }
     async function loadConvList(){
         try{
