@@ -15,7 +15,7 @@ from faster_whisper import WhisperModel
 
 from database import (
     init_db, create_conversation, add_message, update_conversation_title,
-    get_conversations, get_conversation_messages,
+    get_conversations, get_conversation_messages, clear_conversations,
     add_knowledge, get_all_knowledge, delete_knowledge, search_knowledge,
     get_personas, get_persona, add_persona, delete_persona,
 )
@@ -30,6 +30,9 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:1b")
 WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "base")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+# OpenAI model name prefixes/names — extend as new models are released
+OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 
 # OpenAI client (initialized only if key is set)
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -67,18 +70,6 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
 import re
 
 
-async def send_speech(ws: WebSocket, text: str, voice: str = None):
-    """Send text as neural audio if possible, otherwise browser TTS fallback."""
-    cleaned = clean_for_speech(text)
-    if not cleaned or len(cleaned) < 2:
-        return
-    audio_b64 = await tts_to_base64(cleaned, voice)
-    if audio_b64:
-        await ws.send_json({"type": "tts_audio", "audio": audio_b64, "text": cleaned})
-    else:
-        await ws.send_json({"type": "tts_chunk", "text": cleaned})
-
-
 def clean_for_speech(text: str) -> str:
     """Strip code blocks, stage directions, and non-speech text."""
     # Remove code blocks entirely (don't read code aloud)
@@ -94,26 +85,6 @@ def clean_for_speech(text: str) -> str:
     return text.strip()
 
 
-current_tts_voice = TTS_VOICE  # global mutable, set per-session via WS
-
-
-async def tts_to_base64(text: str, voice: str = None) -> str:
-    """Generate speech audio and return as base64-encoded mp3. Returns '' on failure."""
-    text = clean_for_speech(text)
-    if not text or len(text) < 2:
-        return ""
-    try:
-        communicate = edge_tts.Communicate(text, voice or current_tts_voice)
-        buf = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                buf.write(chunk["data"])
-        if buf.tell() == 0:
-            return ""
-        return base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception as e:
-        logger.error(f"TTS generation error: {e}")
-        return ""
 
 
 @app.on_event("startup")
@@ -153,6 +124,19 @@ async def index():
         return HTMLResponse(content=f.read())
 
 
+# ---- Health Check ----
+@app.get("/api/health")
+async def health():
+    status = {"whisper": whisper_model is not None, "ollama": False, "openai": bool(OPENAI_API_KEY)}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as c:
+            r = await c.get(f"{OLLAMA_URL}/api/tags")
+            status["ollama"] = r.status_code == 200
+    except Exception:
+        pass
+    return JSONResponse(content=status)
+
+
 # ---- Conversation API ----
 @app.get("/api/conversations")
 async def list_conversations():
@@ -166,11 +150,25 @@ async def get_conversation(cid: int):
 
 @app.delete("/api/conversations")
 async def clear_all_conversations():
-    async with __import__('aiosqlite').connect(os.environ.get("DB_PATH", "/app/data/voice_chat.db")) as db:
-        await db.execute("DELETE FROM messages")
-        await db.execute("DELETE FROM conversations")
-        await db.commit()
+    await clear_conversations()
     return JSONResponse(content={"ok": True})
+
+
+@app.get("/api/conversations/{cid}/export")
+async def export_conversation(cid: int):
+    """Export a conversation as a plain-text transcript."""
+    from fastapi.responses import PlainTextResponse
+    msgs = await get_conversation_messages(cid)
+    if not msgs:
+        return JSONResponse(content={"error": "Conversation not found"}, status_code=404)
+    lines = []
+    for m in msgs:
+        speaker = "You" if m["role"] == "user" else "AI"
+        lines.append(f"[{speaker}]\n{m['content']}\n")
+    text = "\n".join(lines)
+    return PlainTextResponse(content=text, headers={
+        "Content-Disposition": f'attachment; filename="conversation-{cid}.txt"'
+    })
 
 
 @app.patch("/api/conversations/{cid}")
@@ -321,7 +319,7 @@ def transcribe_audio_sync(audio_bytes: bytes) -> str:
 async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None) -> str:
     """Stream LLM + TTS with minimal latency."""
     use_model = model or OLLAMA_MODEL
-    is_openai = use_model.startswith("gpt-") and openai_client
+    is_openai = any(use_model.startswith(p) for p in OPENAI_MODEL_PREFIXES) and openai_client
 
     if is_openai:
         return await _stream_openai(messages, ws, use_model, cancel_event, voice)
@@ -652,15 +650,24 @@ async def websocket_endpoint(ws: WebSocket):
                                 {"role": "system", "content": "Summarize this conversation in 2-3 sentences. Be concise."},
                                 {"role": "user", "content": older_text[:1500]}
                             ]
-                            async with httpx.AsyncClient(timeout=30.0) as sc:
-                                sr = await sc.post(f"{OLLAMA_URL}/api/chat", json={
-                                    "model": current_model, "messages": summary_msgs, "stream": False,
-                                    "options": {"num_predict": 100}
-                                })
-                                if sr.status_code == 200:
+                            is_openai_model = any(current_model.startswith(p) for p in OPENAI_MODEL_PREFIXES)
+                            if is_openai_model and openai_client:
+                                resp = await openai_client.chat.completions.create(
+                                    model=current_model, messages=summary_msgs,
+                                    stream=False, max_tokens=100,
+                                )
+                                ai_summary = resp.choices[0].message.content or ""
+                            else:
+                                async with httpx.AsyncClient(timeout=30.0) as sc:
+                                    sr = await sc.post(f"{OLLAMA_URL}/api/chat", json={
+                                        "model": current_model, "messages": summary_msgs, "stream": False,
+                                        "options": {"num_predict": 100}
+                                    })
+                                    sr.raise_for_status()
                                     ai_summary = sr.json()["message"]["content"]
-                                    chat_history[1] = {"role": "system", "content": f"Earlier conversation summary: {ai_summary}"}
-                                    logger.info(f"Generated summary: {ai_summary[:100]}")
+                            if ai_summary:
+                                chat_history[1] = {"role": "system", "content": f"Earlier conversation summary: {ai_summary}"}
+                                logger.info(f"Generated summary: {ai_summary[:100]}")
                         except Exception as e:
                             logger.error(f"Summary generation error: {e}")
 

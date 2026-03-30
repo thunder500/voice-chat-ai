@@ -89,6 +89,13 @@ async def get_conversations():
         return [dict(r) for r in await cursor.fetchall()]
 
 
+async def clear_conversations():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM messages")
+        await db.execute("DELETE FROM conversations")
+        await db.commit()
+
+
 async def get_conversation_messages(conversation_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
