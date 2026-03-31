@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: voice-chat-postgres
+    environment:
+      - POSTGRES_DB=voicechat
+      - POSTGRES_USER=voice
+      - POSTGRES_PASSWORD=voice
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voice"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   ollama:
     image: ollama/ollama:latest
     container_name: voice-chat-ollama
@@ -34,8 +52,17 @@ services:
       # Add your OpenAI API key here for GPT models (optional — leave empty for local-only)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=gpt-4o-mini
+      - DATABASE_URL=postgresql://voice:voice@postgres:5432/voicechat
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
     depends_on:
-      - ollama
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -45,6 +72,8 @@ services:
       start_period: 60s
 
 volumes:
+  pgdata:
+    name: voice-chat-pgdata
   ollama_data:
     name: voice-chat-ollama-data
   app_data:
