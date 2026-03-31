@@ -9,17 +9,27 @@ import base64
 import edge_tts
 import httpx
 from openai import AsyncOpenAI
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from faster_whisper import WhisperModel
 
-from database import (
-    init_db, create_conversation, add_message, update_conversation_title,
+from db import init_db, close_db
+from models import (
+    create_user, get_user_by_email, get_user_by_id,
+    get_user_by_google_id, update_last_login, link_google_account,
+    save_api_key, get_api_keys, delete_api_key, get_decrypted_key,
+    create_conversation, add_message, update_conversation_title,
     get_conversations, get_conversation_messages, clear_conversations,
     search_conversations, toggle_star_conversation,
     add_knowledge, get_all_knowledge, delete_knowledge, search_knowledge,
     get_personas, get_persona, add_persona, delete_persona,
 )
+from auth import (
+    hash_password, verify_password, create_access_token, create_refresh_token,
+    decode_token, get_user_id_from_request, get_user_id_from_ws,
+)
+from oauth import get_google_auth_url, exchange_google_code, GOOGLE_CLIENT_ID
+from migrate import run_migration
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +41,7 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:1b")
 WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "base")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8000")
 
 # OpenAI model name prefixes/names — extend as new models are released
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
@@ -86,19 +97,21 @@ def clean_for_speech(text: str) -> str:
     return text.strip()
 
 
-
-
 @app.on_event("startup")
 async def startup():
     global whisper_model
     logger.info("Initializing database...")
     await init_db()
+    await run_migration()
     logger.info(f"Loading Whisper model ({WHISPER_MODEL_SIZE})...")
     whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
     logger.info("Whisper model loaded.")
-
-    # Warm up Ollama model so first request is fast
     asyncio.create_task(warmup_ollama())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await close_db()
 
 
 async def warmup_ollama():
@@ -138,34 +151,273 @@ async def health():
     return JSONResponse(content=status)
 
 
+# ---- Auth Endpoints ----
+@app.post("/api/auth/register")
+async def register(data: dict):
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    name = (data.get("name") or "").strip()
+
+    if not email or not password or not name:
+        return JSONResponse(content={"error": "email, password, and name are required"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse(content={"error": "Password must be at least 8 characters"}, status_code=400)
+
+    existing = await get_user_by_email(email)
+    if existing:
+        return JSONResponse(content={"error": "Email already registered"}, status_code=409)
+
+    user = await create_user(email=email, name=name, password_hash=hash_password(password))
+    user_id = str(user["id"])
+
+    access_token = create_access_token(user_id)
+    refresh_token = create_refresh_token(user_id)
+
+    response = JSONResponse(content={
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {"id": user_id, "email": user["email"], "name": user["name"]},
+    })
+    response.set_cookie(
+        "refresh_token", refresh_token,
+        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+    )
+    return response
+
+
+@app.post("/api/auth/login")
+async def login(data: dict):
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not email or not password:
+        return JSONResponse(content={"error": "email and password are required"}, status_code=400)
+
+    user = await get_user_by_email(email)
+    if not user or not user.get("password_hash"):
+        return JSONResponse(content={"error": "Invalid credentials"}, status_code=401)
+    if not verify_password(password, user["password_hash"]):
+        return JSONResponse(content={"error": "Invalid credentials"}, status_code=401)
+
+    user_id = str(user["id"])
+    await update_last_login(user_id)
+
+    access_token = create_access_token(user_id)
+    refresh_token = create_refresh_token(user_id)
+
+    response = JSONResponse(content={
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {"id": user_id, "email": user["email"], "name": user["name"]},
+    })
+    response.set_cookie(
+        "refresh_token", refresh_token,
+        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+    )
+    return response
+
+
+@app.post("/api/auth/refresh")
+async def refresh_token(request: Request):
+    token = request.cookies.get("refresh_token")
+    if not token:
+        return JSONResponse(content={"error": "No refresh token"}, status_code=401)
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "refresh":
+            return JSONResponse(content={"error": "Invalid token type"}, status_code=401)
+        user_id = payload["sub"]
+    except (ValueError, KeyError):
+        return JSONResponse(content={"error": "Invalid or expired refresh token"}, status_code=401)
+
+    access_token = create_access_token(user_id)
+    return JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
+
+
+@app.get("/api/auth/me")
+async def get_me(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user:
+        return JSONResponse(content={"error": "User not found"}, status_code=404)
+    return JSONResponse(content={
+        "id": str(user["id"]),
+        "email": user["email"],
+        "name": user["name"],
+        "avatar_url": user.get("avatar_url"),
+        "auth_provider": user.get("auth_provider"),
+    })
+
+
+@app.post("/api/auth/logout")
+async def logout():
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie("refresh_token")
+    return response
+
+
+@app.get("/api/auth/google")
+async def google_login():
+    url = get_google_auth_url()
+    return RedirectResponse(url=url)
+
+
+@app.get("/api/auth/google/callback")
+async def google_callback(code: str = None, error: str = None):
+    if error or not code:
+        return RedirectResponse(url=f"{FRONTEND_URL}/?error=google_auth_failed")
+
+    try:
+        userinfo = await exchange_google_code(code)
+    except Exception as e:
+        logger.error(f"Google OAuth error: {e}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/?error=google_auth_failed")
+
+    google_id = userinfo.get("id") or userinfo.get("sub")
+    email = userinfo.get("email", "").lower()
+    name = userinfo.get("name", "")
+    avatar_url = userinfo.get("picture")
+
+    if not google_id or not email:
+        return RedirectResponse(url=f"{FRONTEND_URL}/?error=google_missing_info")
+
+    # Find or create user
+    user = await get_user_by_google_id(google_id)
+    if not user:
+        user = await get_user_by_email(email)
+        if user:
+            # Link Google to existing account
+            await link_google_account(str(user["id"]), google_id, avatar_url)
+            user = await get_user_by_id(str(user["id"]))
+        else:
+            # Create new user via Google
+            user = await create_user(
+                email=email, name=name,
+                auth_provider="google", google_id=google_id, avatar_url=avatar_url,
+            )
+
+    user_id = str(user["id"])
+    await update_last_login(user_id)
+
+    access_token = create_access_token(user_id)
+    refresh_token = create_refresh_token(user_id)
+
+    response = RedirectResponse(url=f"{FRONTEND_URL}/?token={access_token}")
+    response.set_cookie(
+        "refresh_token", refresh_token,
+        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+    )
+    return response
+
+
+# ---- BYOK (Bring Your Own Key) Endpoints ----
+@app.get("/api/keys")
+async def list_keys(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    keys = await get_api_keys(user_id)
+    # Return only safe fields (masked key, no raw encrypted bytes)
+    safe = [
+        {
+            "id": k["id"],
+            "provider": k["provider"],
+            "masked_key": k.get("masked_key", "...****"),
+            "model_preference": k.get("model_preference"),
+        }
+        for k in keys
+    ]
+    return JSONResponse(content=safe)
+
+
+@app.post("/api/keys")
+async def add_key(request: Request, data: dict):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    provider = (data.get("provider") or "").strip().lower()
+    api_key = (data.get("api_key") or "").strip()
+    model_preference = data.get("model_preference")
+    if not provider or not api_key:
+        return JSONResponse(content={"error": "provider and api_key are required"}, status_code=400)
+    kid = await save_api_key(user_id, provider, api_key, model_preference)
+    return JSONResponse(content={"id": kid})
+
+
+@app.delete("/api/keys/{provider}")
+async def remove_key(provider: str, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    await delete_api_key(user_id, provider)
+    return JSONResponse(content={"ok": True})
+
+
+@app.post("/api/keys/test")
+async def test_key(request: Request, data: dict):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    api_key = (data.get("api_key") or "").strip()
+    if not api_key:
+        return JSONResponse(content={"error": "api_key is required"}, status_code=400)
+    try:
+        test_client = AsyncOpenAI(api_key=api_key)
+        resp = await test_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        return JSONResponse(content={"ok": True})
+    except Exception as e:
+        return JSONResponse(content={"ok": False, "error": str(e)}, status_code=400)
+
+
 # ---- Conversation API ----
 @app.get("/api/conversations")
-async def list_conversations():
-    return JSONResponse(content=await get_conversations())
+async def list_conversations(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    return JSONResponse(content=await get_conversations(user_id))
 
 
 @app.get("/api/conversations/search")
-async def search_convs(q: str = ""):
+async def search_convs(request: Request, q: str = ""):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     if not q.strip():
-        return JSONResponse(content=await get_conversations())
-    return JSONResponse(content=await search_conversations(q.strip()))
+        return JSONResponse(content=await get_conversations(user_id))
+    return JSONResponse(content=await search_conversations(user_id, q.strip()))
 
 
 @app.get("/api/conversations/{cid}")
-async def get_conversation(cid: int):
+async def get_conversation(cid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     return JSONResponse(content=await get_conversation_messages(cid))
 
 
 @app.delete("/api/conversations")
-async def clear_all_conversations():
-    await clear_conversations()
+async def clear_all_conversations(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    await clear_conversations(user_id)
     return JSONResponse(content={"ok": True})
 
 
 @app.get("/api/conversations/{cid}/export")
-async def export_conversation(cid: int):
+async def export_conversation(cid: int, request: Request):
     """Export a conversation as a plain-text transcript."""
     from fastapi.responses import PlainTextResponse
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     msgs = await get_conversation_messages(cid)
     if not msgs:
         return JSONResponse(content={"error": "Conversation not found"}, status_code=404)
@@ -180,13 +432,19 @@ async def export_conversation(cid: int):
 
 
 @app.patch("/api/conversations/{cid}")
-async def rename_conversation(cid: int, data: dict):
+async def rename_conversation(cid: int, request: Request, data: dict):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     await update_conversation_title(cid, data.get("title", "Untitled"))
     return JSONResponse(content={"ok": True})
 
 
 @app.patch("/api/conversations/{cid}/star")
-async def star_conversation(cid: int):
+async def star_conversation(cid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     starred = await toggle_star_conversation(cid)
     return JSONResponse(content={"ok": True, "starred": starred})
 
@@ -224,10 +482,17 @@ async def list_voices():
 
 # ---- Models API ----
 @app.get("/api/models")
-async def list_models():
+async def list_models(request: Request):
+    user_id = get_user_id_from_request(request)
     models = []
-    # Add OpenAI models if API key is set
-    if OPENAI_API_KEY:
+    # Check for user's own OpenAI key, fall back to server key
+    has_openai = bool(OPENAI_API_KEY)
+    if user_id:
+        user_key = await get_decrypted_key(user_id, "openai")
+        if user_key:
+            has_openai = True
+    # Add OpenAI models if API key is available
+    if has_openai:
         models.extend([
             {"name": "gpt-4o-mini", "size": 0, "provider": "openai"},
             {"name": "gpt-4o", "size": 0, "provider": "openai"},
@@ -248,16 +513,23 @@ async def list_models():
 
 # ---- Knowledge Base API ----
 @app.get("/api/knowledge")
-async def list_knowledge():
-    return JSONResponse(content=await get_all_knowledge())
+async def list_knowledge(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    return JSONResponse(content=await get_all_knowledge(user_id))
 
 
 @app.post("/api/knowledge")
 async def upload_knowledge(
+    request: Request,
     title: str = Form(...),
     content: str = Form(None),
     file: UploadFile = File(None),
 ):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
     if file and file.filename:
         raw = await file.read()
         if file.filename.endswith(".pdf"):
@@ -270,9 +542,9 @@ async def upload_knowledge(
                 return JSONResponse(content={"error": f"PDF parse error: {str(e)}"}, status_code=400)
         else:
             text = raw.decode("utf-8", errors="ignore")
-        kid = await add_knowledge(title or file.filename, text, file.content_type or "file")
+        kid = await add_knowledge(user_id, title or file.filename, text, file.content_type or "file")
     elif content:
-        kid = await add_knowledge(title, content, "text")
+        kid = await add_knowledge(user_id, title, content, "text")
     else:
         return JSONResponse(content={"error": "No content or file provided"}, status_code=400)
 
@@ -280,26 +552,38 @@ async def upload_knowledge(
 
 
 @app.delete("/api/knowledge/{kid}")
-async def remove_knowledge(kid: int):
-    await delete_knowledge(kid)
+async def remove_knowledge(kid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    await delete_knowledge(user_id, kid)
     return JSONResponse(content={"ok": True})
 
 
 # ---- Personas API ----
 @app.get("/api/personas")
-async def list_personas():
-    return JSONResponse(content=await get_personas())
+async def list_personas(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    return JSONResponse(content=await get_personas(user_id))
 
 
 @app.post("/api/personas")
-async def create_persona(data: dict):
-    pid = await add_persona(data["name"], data["prompt"])
+async def create_persona(request: Request, data: dict):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    pid = await add_persona(user_id, data["name"], data["prompt"])
     return JSONResponse(content={"id": pid})
 
 
 @app.delete("/api/personas/{pid}")
-async def remove_persona(pid: int):
-    await delete_persona(pid)
+async def remove_persona(pid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    await delete_persona(user_id, pid)
     return JSONResponse(content={"ok": True})
 
 
@@ -330,13 +614,14 @@ def transcribe_audio_sync(audio_bytes: bytes) -> str:
 
 
 # ---- LLM Streaming (cancellable) ----
-async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None) -> str:
+async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None, llm_client: AsyncOpenAI = None) -> str:
     """Stream LLM + TTS with minimal latency."""
     use_model = model or OLLAMA_MODEL
-    is_openai = any(use_model.startswith(p) for p in OPENAI_MODEL_PREFIXES) and openai_client
+    active_client = llm_client or openai_client
+    is_openai = any(use_model.startswith(p) for p in OPENAI_MODEL_PREFIXES) and active_client
 
     if is_openai:
-        return await _stream_openai(messages, ws, use_model, cancel_event, voice)
+        return await _stream_openai(messages, ws, use_model, cancel_event, voice, active_client)
     return await _stream_ollama(messages, ws, use_model, cancel_event, voice)
 
 
@@ -362,7 +647,7 @@ async def _send_tts(ws, text, voice=None):
     await ws.send_json({"type": "tts_chunk", "text": cleaned})
 
 
-async def _stream_openai(messages, ws, model, cancel_event, voice):
+async def _stream_openai(messages, ws, model, cancel_event, voice, client: AsyncOpenAI):
     """Stream from OpenAI API — ~200ms first token."""
     full_response = ""
     tts_buffer = ""
@@ -374,7 +659,7 @@ async def _stream_openai(messages, ws, model, cancel_event, voice):
         # Signal start of streaming
         await ws.send_json({"type": "stream_start"})
 
-        stream = await openai_client.chat.completions.create(
+        stream = await client.chat.completions.create(
             model=model, messages=messages, stream=True,
             max_tokens=500, temperature=0.7,
         )
@@ -546,8 +831,18 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice):
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
+    user_id = await get_user_id_from_ws(ws)
+    if not user_id:
+        await ws.send_json({"type": "error", "message": "Not authenticated"})
+        await ws.close()
+        return
+
+    # Use user's own OpenAI key if saved, otherwise fall back to server key
+    user_openai_key = await get_decrypted_key(user_id, "openai")
+    user_openai_client = AsyncOpenAI(api_key=user_openai_key) if user_openai_key else openai_client
+
     conversation_id = None
-    current_model = OPENAI_MODEL if OPENAI_API_KEY else OLLAMA_MODEL
+    current_model = OPENAI_MODEL if (user_openai_client is not None) else OLLAMA_MODEL
     current_voice = TTS_VOICE
     current_persona_prompt = DEFAULT_SYSTEM_PROMPT
     chat_history = [{"role": "system", "content": current_persona_prompt}]
@@ -595,7 +890,7 @@ async def websocket_endpoint(ws: WebSocket):
                 if raw == "start" and not greeted:
                     greeted = True
                     logger.info("Sending AI greeting...")
-                    conversation_id = await create_conversation("New conversation")
+                    conversation_id = await create_conversation(user_id, "New conversation")
                     await ws.send_json({"type": "conversation_id", "id": conversation_id})
                     await add_message(conversation_id, "assistant", GREETING_TEXT)
                     chat_history.append({"role": "assistant", "content": GREETING_TEXT})
@@ -665,8 +960,8 @@ async def websocket_endpoint(ws: WebSocket):
                                 {"role": "user", "content": older_text[:1500]}
                             ]
                             is_openai_model = any(current_model.startswith(p) for p in OPENAI_MODEL_PREFIXES)
-                            if is_openai_model and openai_client:
-                                resp = await openai_client.chat.completions.create(
+                            if is_openai_model and user_openai_client:
+                                resp = await user_openai_client.chat.completions.create(
                                     model=current_model, messages=summary_msgs,
                                     stream=False, max_tokens=100,
                                 )
@@ -711,13 +1006,13 @@ async def websocket_endpoint(ws: WebSocket):
             is_first = False
             if conversation_id is None:
                 is_first = True
-                conversation_id = await create_conversation("New conversation")
+                conversation_id = await create_conversation(user_id, "New conversation")
                 await ws.send_json({"type": "conversation_id", "id": conversation_id})
 
             await add_message(conversation_id, "user", user_text)
 
             # Search knowledge base for context
-            kb_results = await search_knowledge(user_text)
+            kb_results = await search_knowledge(user_id, user_text)
             if kb_results:
                 kb_context = "\n\n".join(f"[{r['title']}]: {r['content'][:500]}" for r in kb_results)
                 kb_msg = {"role": "system", "content": f"Relevant knowledge:\n{kb_context}\n\nUse this info if relevant to answer the user."}
@@ -738,9 +1033,11 @@ async def websocket_endpoint(ws: WebSocket):
             # Run LLM as background task so we can still receive user messages (interrupts)
             _ut = user_text  # capture for closure
             _cid = conversation_id
-            async def run_llm(msgs, conv_id, captured_text):
+            _client = user_openai_client  # capture per-user client for closure
+
+            async def run_llm(msgs, conv_id, captured_text, llm_client):
                 try:
-                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice)
+                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice, llm_client)
                     if ai_text and not cancel_event.is_set():
                         logger.info(f"AI response: {ai_text}")
                         chat_history.append({"role": "assistant", "content": ai_text})
@@ -756,7 +1053,7 @@ async def websocket_endpoint(ws: WebSocket):
                     except Exception:
                         pass
 
-            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut))
+            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut, _client))
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
