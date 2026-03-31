@@ -45,6 +45,27 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8000")
 
 # OpenAI model name prefixes/names — extend as new models are released
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+ANTHROPIC_MODEL_PREFIXES = ("claude-",)
+GROQ_MODEL_PREFIXES = ("llama", "mixtral", "gemma", "whisper")
+GEMINI_MODEL_PREFIXES = ("gemini-",)
+
+# Provider detection: given a model name, determine which provider it belongs to
+def detect_provider(model_name: str) -> str:
+    if any(model_name.startswith(p) for p in ANTHROPIC_MODEL_PREFIXES):
+        return "anthropic"
+    if any(model_name.startswith(p) for p in GEMINI_MODEL_PREFIXES):
+        return "google"
+    if any(model_name.startswith(p) for p in OPENAI_MODEL_PREFIXES):
+        return "openai"
+    # Groq models have specific names
+    if model_name in GROQ_MODELS:
+        return "groq"
+    return "ollama"
+
+GROQ_MODELS = {
+    "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768", "gemma2-9b-it",
+}
 
 # OpenAI client (initialized only if key is set)
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -415,16 +436,35 @@ async def test_key(request: Request, data: dict):
     user_id = get_user_id_from_request(request)
     if not user_id:
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
-    api_key = (data.get("api_key") or "").strip()
+    provider = (data.get("provider") or "openai").strip()
+    api_key = (data.get("api_key") or data.get("key") or "").strip()
     if not api_key:
         return JSONResponse(content={"error": "api_key is required"}, status_code=400)
     try:
-        test_client = AsyncOpenAI(api_key=api_key)
-        resp = await test_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
+        if provider == "openai":
+            test_client = AsyncOpenAI(api_key=api_key)
+            await test_client.chat.completions.create(
+                model="gpt-4o-mini", messages=[{"role": "user", "content": "hi"}], max_tokens=1,
+            )
+        elif provider == "anthropic":
+            import anthropic
+            test_client = anthropic.AsyncAnthropic(api_key=api_key)
+            await test_client.messages.create(
+                model="claude-3-5-haiku-20241022", max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        elif provider == "groq":
+            test_client = AsyncOpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+            await test_client.chat.completions.create(
+                model="llama-3.1-8b-instant", messages=[{"role": "user", "content": "hi"}], max_tokens=1,
+            )
+        elif provider == "google":
+            test_client = AsyncOpenAI(api_key=api_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+            await test_client.chat.completions.create(
+                model="gemini-2.0-flash", messages=[{"role": "user", "content": "hi"}], max_tokens=1,
+            )
+        else:
+            return JSONResponse(content={"ok": True, "note": "Key saved without verification"})
         return JSONResponse(content={"ok": True})
     except Exception as e:
         return JSONResponse(content={"ok": False, "error": str(e)}, status_code=400)
@@ -548,20 +588,52 @@ async def list_voices():
 async def list_models(request: Request):
     user_id = get_user_id_from_request(request)
     models = []
-    # Check for user's own OpenAI key, fall back to server key
+
+    # Check which provider keys the user has
     has_openai = bool(OPENAI_API_KEY)
+    has_anthropic = False
+    has_groq = False
+    has_google = False
     if user_id:
-        user_key = await get_decrypted_key(user_id, "openai")
-        if user_key:
-            has_openai = True
-    # Add OpenAI models if API key is available
+        for provider in ["openai", "anthropic", "groq", "google"]:
+            key = await get_decrypted_key(user_id, provider)
+            if key:
+                if provider == "openai": has_openai = True
+                elif provider == "anthropic": has_anthropic = True
+                elif provider == "groq": has_groq = True
+                elif provider == "google": has_google = True
+
+    # OpenAI models
     if has_openai:
         models.extend([
             {"name": "gpt-4o-mini", "size": 0, "provider": "openai"},
             {"name": "gpt-4o", "size": 0, "provider": "openai"},
             {"name": "gpt-3.5-turbo", "size": 0, "provider": "openai"},
         ])
-    # Add local Ollama models
+
+    # Anthropic (Claude) models
+    if has_anthropic:
+        models.extend([
+            {"name": "claude-sonnet-4-20250514", "size": 0, "provider": "anthropic"},
+            {"name": "claude-3-5-haiku-20241022", "size": 0, "provider": "anthropic"},
+        ])
+
+    # Groq models (ultra-fast)
+    if has_groq:
+        models.extend([
+            {"name": "llama-3.3-70b-versatile", "size": 0, "provider": "groq"},
+            {"name": "llama-3.1-8b-instant", "size": 0, "provider": "groq"},
+            {"name": "mixtral-8x7b-32768", "size": 0, "provider": "groq"},
+        ])
+
+    # Google Gemini models
+    if has_google:
+        models.extend([
+            {"name": "gemini-2.0-flash", "size": 0, "provider": "google"},
+            {"name": "gemini-1.5-flash", "size": 0, "provider": "google"},
+        ])
+
+    # Local Ollama models (always available)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{OLLAMA_URL}/api/tags")
@@ -677,14 +749,25 @@ def transcribe_audio_sync(audio_bytes: bytes) -> str:
 
 
 # ---- LLM Streaming (cancellable) ----
-async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None, llm_client: AsyncOpenAI = None, tts_client: AsyncOpenAI = None) -> str:
-    """Stream LLM + TTS with minimal latency."""
+async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None, llm_client: AsyncOpenAI = None, tts_client: AsyncOpenAI = None, user_keys: dict = None) -> str:
+    """Stream LLM + TTS with minimal latency. Routes to correct provider."""
     use_model = model or OLLAMA_MODEL
-    active_client = llm_client or openai_client
-    is_openai = any(use_model.startswith(p) for p in OPENAI_MODEL_PREFIXES) and active_client
+    provider = detect_provider(use_model)
+    user_keys = user_keys or {}
 
-    if is_openai:
-        return await _stream_openai(messages, ws, use_model, cancel_event, voice, active_client, tts_client)
+    if provider == "anthropic":
+        return await _stream_anthropic(messages, ws, use_model, cancel_event, voice, user_keys.get("anthropic"), tts_client)
+    elif provider == "groq":
+        groq_client = AsyncOpenAI(api_key=user_keys.get("groq"), base_url="https://api.groq.com/openai/v1")
+        return await _stream_openai(messages, ws, use_model, cancel_event, voice, groq_client, tts_client)
+    elif provider == "google":
+        gemini_client = AsyncOpenAI(api_key=user_keys.get("google"), base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+        return await _stream_openai(messages, ws, use_model, cancel_event, voice, gemini_client, tts_client)
+    elif provider == "openai":
+        active_client = llm_client or openai_client
+        if active_client:
+            return await _stream_openai(messages, ws, use_model, cancel_event, voice, active_client, tts_client)
+
     return await _stream_ollama(messages, ws, use_model, cancel_event, voice, tts_client)
 
 
@@ -911,6 +994,96 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice, tts_client=No
     return full_response.strip()
 
 
+async def _stream_anthropic(messages, ws, model, cancel_event, voice, api_key, tts_client=None):
+    """Stream from Anthropic Claude API."""
+    import anthropic
+
+    if not api_key:
+        await ws.send_json({"type": "error", "message": "No Anthropic API key configured"})
+        return ""
+
+    system_prompt = ""
+    chat_msgs = []
+    for m in messages:
+        if m["role"] == "system":
+            system_prompt += m["content"] + "\n"
+        else:
+            chat_msgs.append({"role": m["role"], "content": m["content"]})
+
+    full_response = ""
+    tts_buffer = ""
+    chunk_count = 0
+    sentence_enders = {'.', '!', '?', '\n'}
+    in_code_block = False
+
+    await ws.send_json({"type": "stream_start"})
+
+    try:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        async with client.messages.stream(
+            model=model, max_tokens=500, system=system_prompt.strip(), messages=chat_msgs,
+        ) as stream:
+            async for text in stream.text_stream:
+                if cancel_event and cancel_event.is_set():
+                    break
+
+                full_response += text
+                await ws.send_json({"type": "text_delta", "delta": text})
+
+                if '```' in text:
+                    in_code_block = not in_code_block
+                    if in_code_block:
+                        if tts_buffer.strip():
+                            await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
+                            chunk_count += 1
+                        tts_buffer = ""
+                    else:
+                        tts_buffer = " I've included the code in the chat. "
+                    continue
+
+                if in_code_block:
+                    continue
+
+                tts_buffer += text
+
+                if "[WAIT]" in tts_buffer:
+                    parts = tts_buffer.split("[WAIT]")
+                    before = parts[0].strip()
+                    if before:
+                        await _send_tts(ws, before, voice, tts_client)
+                        chunk_count += 1
+                    await ws.send_json({"type": "tts_done"})
+                    tts_buffer = parts[1] if len(parts) > 1 else ""
+                    continue
+
+                min_len = 3 if chunk_count == 0 else 5
+                last_break = -1
+                for i, ch in enumerate(tts_buffer):
+                    if ch in sentence_enders and i >= min_len:
+                        last_break = i
+                        break
+                    elif ch == ',' and i > 12:
+                        last_break = i
+                        break
+
+                if last_break >= min_len:
+                    c = tts_buffer[:last_break + 1].strip()
+                    tts_buffer = tts_buffer[last_break + 1:]
+                    if c:
+                        await _send_tts(ws, c, voice, tts_client)
+                        chunk_count += 1
+
+        if tts_buffer.strip() and not (cancel_event and cancel_event.is_set()):
+            await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
+        await ws.send_json({"type": "stream_end"})
+        await ws.send_json({"type": "tts_done"})
+    except Exception as e:
+        logger.error(f"Anthropic stream error: {e}")
+        await ws.send_json({"type": "error", "message": str(e)})
+
+    return full_response.strip()
+
+
 # ---- WebSocket ----
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -921,9 +1094,14 @@ async def websocket_endpoint(ws: WebSocket):
         await ws.close()
         return
 
-    # Use user's own OpenAI key if saved, otherwise fall back to server key
+    # Load all user API keys for multi-provider support
     user_openai_key = await get_decrypted_key(user_id, "openai")
     user_openai_client = AsyncOpenAI(api_key=user_openai_key) if user_openai_key else openai_client
+    user_keys = {}
+    for prov in ["openai", "anthropic", "groq", "google"]:
+        k = await get_decrypted_key(user_id, prov)
+        if k:
+            user_keys[prov] = k
 
     conversation_id = None
     current_model = OPENAI_MODEL if (user_openai_client is not None) else OLLAMA_MODEL
@@ -1119,9 +1297,9 @@ async def websocket_endpoint(ws: WebSocket):
             _cid = conversation_id
             _client = user_openai_client  # capture per-user client for closure
 
-            async def run_llm(msgs, conv_id, captured_text, llm_client, tts_cl):
+            async def run_llm(msgs, conv_id, captured_text, llm_client, tts_cl, keys):
                 try:
-                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice, llm_client, tts_cl)
+                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice, llm_client, tts_cl, keys)
                     if ai_text and not cancel_event.is_set():
                         logger.info(f"AI response: {ai_text}")
                         chat_history.append({"role": "assistant", "content": ai_text})
@@ -1137,7 +1315,7 @@ async def websocket_endpoint(ws: WebSocket):
                     except Exception:
                         pass
 
-            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut, _client, _client))
+            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut, _client, _client, user_keys))
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
