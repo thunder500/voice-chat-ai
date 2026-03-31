@@ -506,6 +506,14 @@ async def star_conversation(cid: int, request: Request):
 
 # ---- Voices API ----
 VOICE_LIST = [
+    # OpenAI TTS voices (natural, requires OpenAI key)
+    {"id": "alloy", "name": "Alloy", "gender": "Neutral", "accent": "OpenAI"},
+    {"id": "nova", "name": "Nova", "gender": "Female", "accent": "OpenAI"},
+    {"id": "shimmer", "name": "Shimmer", "gender": "Female", "accent": "OpenAI"},
+    {"id": "echo", "name": "Echo", "gender": "Male", "accent": "OpenAI"},
+    {"id": "onyx", "name": "Onyx", "gender": "Male", "accent": "OpenAI"},
+    {"id": "fable", "name": "Fable", "gender": "Neutral", "accent": "OpenAI"},
+    # Edge-TTS voices (free, neural)
     {"id": "en-US-AriaNeural", "name": "Aria", "gender": "Female", "accent": "US"},
     {"id": "en-US-AvaNeural", "name": "Ava", "gender": "Female", "accent": "US"},
     {"id": "en-US-EmmaNeural", "name": "Emma", "gender": "Female", "accent": "US"},
@@ -669,23 +677,43 @@ def transcribe_audio_sync(audio_bytes: bytes) -> str:
 
 
 # ---- LLM Streaming (cancellable) ----
-async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None, llm_client: AsyncOpenAI = None) -> str:
+async def stream_llm(messages: list[dict], ws: WebSocket, model: str = None, cancel_event: asyncio.Event = None, voice: str = None, llm_client: AsyncOpenAI = None, tts_client: AsyncOpenAI = None) -> str:
     """Stream LLM + TTS with minimal latency."""
     use_model = model or OLLAMA_MODEL
     active_client = llm_client or openai_client
     is_openai = any(use_model.startswith(p) for p in OPENAI_MODEL_PREFIXES) and active_client
 
     if is_openai:
-        return await _stream_openai(messages, ws, use_model, cancel_event, voice, active_client)
-    return await _stream_ollama(messages, ws, use_model, cancel_event, voice)
+        return await _stream_openai(messages, ws, use_model, cancel_event, voice, active_client, tts_client)
+    return await _stream_ollama(messages, ws, use_model, cancel_event, voice, tts_client)
 
 
-async def _send_tts(ws, text, voice=None):
-    """Generate audio with edge-tts and send as base64. Falls back to browser TTS."""
+OPENAI_TTS_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
+
+
+async def _send_tts(ws, text, voice=None, openai_client_override=None):
+    """Generate audio: OpenAI TTS > edge-tts > browser TTS."""
     cleaned = clean_for_speech(text)
     if not cleaned or len(cleaned) < 2:
         return
     tts_voice = voice or TTS_VOICE
+
+    # Try OpenAI TTS first if user has a key (natural, fast)
+    if openai_client_override and tts_voice in OPENAI_TTS_VOICES:
+        try:
+            response = await openai_client_override.audio.speech.create(
+                model="tts-1", voice=tts_voice, input=cleaned,
+                response_format="mp3", speed=1.0,
+            )
+            audio_data = response.content
+            if audio_data:
+                b64 = base64.b64encode(audio_data).decode()
+                await ws.send_json({"type": "tts_audio", "audio": b64})
+                return
+        except Exception as e:
+            logger.warning(f"OpenAI TTS failed: {e}")
+
+    # Try edge-tts (free neural voices)
     try:
         comm = edge_tts.Communicate(cleaned, tts_voice)
         audio_data = b""
@@ -698,11 +726,12 @@ async def _send_tts(ws, text, voice=None):
             return
     except Exception as e:
         logger.warning(f"Edge-TTS failed, falling back to browser: {e}")
+
     # Fallback to browser TTS
     await ws.send_json({"type": "tts_chunk", "text": cleaned})
 
 
-async def _stream_openai(messages, ws, model, cancel_event, voice, client: AsyncOpenAI):
+async def _stream_openai(messages, ws, model, cancel_event, voice, client: AsyncOpenAI, tts_client=None):
     """Stream from OpenAI API — ~200ms first token."""
     full_response = ""
     tts_buffer = ""
@@ -737,7 +766,7 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 if in_code_block:
                     # Flush TTS buffer before code
                     if tts_buffer.strip():
-                        await _send_tts(ws, tts_buffer.strip(), voice)
+                        await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
                         chunk_count += 1
                     tts_buffer = ""
                 else:
@@ -754,7 +783,7 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 parts = tts_buffer.split("[WAIT]")
                 before = parts[0].strip()
                 if before:
-                    await _send_tts(ws, before, voice)
+                    await _send_tts(ws, before, voice, tts_client)
                     chunk_count += 1
                 await ws.send_json({"type": "tts_done"})
                 tts_buffer = parts[1] if len(parts) > 1 else ""
@@ -774,12 +803,12 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 c = tts_buffer[:last_break + 1].strip()
                 tts_buffer = tts_buffer[last_break + 1:]
                 if c:
-                    await _send_tts(ws, c, voice)
+                    await _send_tts(ws, c, voice, tts_client)
                     chunk_count += 1
 
         # Flush remaining TTS buffer
         if tts_buffer.strip() and not (cancel_event and cancel_event.is_set()):
-            await _send_tts(ws, tts_buffer.strip(), voice)
+            await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
         await ws.send_json({"type": "stream_end"})
         await ws.send_json({"type": "tts_done"})
     except Exception as e:
@@ -789,7 +818,7 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
     return full_response.strip()
 
 
-async def _stream_ollama(messages, ws, model, cancel_event, voice):
+async def _stream_ollama(messages, ws, model, cancel_event, voice, tts_client=None):
     """Stream from local Ollama with typing animation."""
     payload = {
         "model": model,
@@ -823,7 +852,7 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice):
 
                 if data.get("done"):
                     if tts_buffer.strip():
-                        await _send_tts(ws, tts_buffer.strip(), voice)
+                        await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
                     await ws.send_json({"type": "stream_end"})
                     await ws.send_json({"type": "tts_done"})
                     break
@@ -840,7 +869,7 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice):
                     in_code_block = not in_code_block
                     if in_code_block:
                         if tts_buffer.strip():
-                            await _send_tts(ws, tts_buffer.strip(), voice)
+                            await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
                             chunk_count += 1
                         tts_buffer = ""
                     else:
@@ -856,7 +885,7 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice):
                     parts = tts_buffer.split("[WAIT]")
                     before = parts[0].strip()
                     if before:
-                        await _send_tts(ws, before, voice)
+                        await _send_tts(ws, before, voice, tts_client)
                         chunk_count += 1
                     await ws.send_json({"type": "tts_done"})
                     tts_buffer = parts[1] if len(parts) > 1 else ""
@@ -876,7 +905,7 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice):
                     chunk = tts_buffer[:last_break + 1].strip()
                     tts_buffer = tts_buffer[last_break + 1:]
                     if chunk:
-                        await _send_tts(ws, chunk, voice)
+                        await _send_tts(ws, chunk, voice, tts_client)
                         chunk_count += 1
 
     return full_response.strip()
@@ -950,7 +979,7 @@ async def websocket_endpoint(ws: WebSocket):
                     await add_message(conversation_id, "assistant", GREETING_TEXT)
                     chat_history.append({"role": "assistant", "content": GREETING_TEXT})
                     # Greeting with edge-tts natural voice
-                    await _send_tts(ws, GREETING_TEXT, current_voice)
+                    await _send_tts(ws, GREETING_TEXT, current_voice, user_openai_client)
                     await ws.send_json({"type": "tts_done"})
                     continue
 
@@ -1090,9 +1119,9 @@ async def websocket_endpoint(ws: WebSocket):
             _cid = conversation_id
             _client = user_openai_client  # capture per-user client for closure
 
-            async def run_llm(msgs, conv_id, captured_text, llm_client):
+            async def run_llm(msgs, conv_id, captured_text, llm_client, tts_cl):
                 try:
-                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice, llm_client)
+                    ai_text = await stream_llm(msgs, ws, current_model, cancel_event, current_voice, llm_client, tts_cl)
                     if ai_text and not cancel_event.is_set():
                         logger.info(f"AI response: {ai_text}")
                         chat_history.append({"role": "assistant", "content": ai_text})
@@ -1108,7 +1137,7 @@ async def websocket_endpoint(ws: WebSocket):
                     except Exception:
                         pass
 
-            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut, _client))
+            llm_task = asyncio.create_task(run_llm(messages_with_kb, _cid, _ut, _client, _client))
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
