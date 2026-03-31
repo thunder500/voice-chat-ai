@@ -211,7 +211,7 @@
           <input type="password" id="regPassword" placeholder="Password (min 6 chars)" required minlength="6">
           <button type="submit" class="auth-submit">Create Account</button>
         </form>
-        <div id="googleAuthBtn" style="display:none">
+        <div id="googleAuthBtn">
           <div class="auth-divider"><span>or</span></div>
           <a href="/api/auth/google" class="google-btn">Sign in with Google</a>
         </div>
@@ -395,9 +395,7 @@
                 currentUser = await resp.json();
                 hideAuthOverlay();
                 updateUserMenu();
-                fetch('/api/auth/google').then(r => {
-                    if (r.status !== 501) document.getElementById('googleAuthBtn').style.display = 'block';
-                }).catch(() => {});
+                loadConversations(); loadModels(); loadVoices(); loadPersonas();
             } else { showAuthOverlay(); }
         } catch { showAuthOverlay(); }
     }
@@ -530,6 +528,7 @@
 
     // ---- WebSocket ----
     function connectWS(){
+        if(!accessToken) return;
         const p=location.protocol==='https:'?'wss:':'ws:';
         ws=new WebSocket(`${p}//${location.host}/ws?token=${accessToken}`);
         ws.onopen=()=>{connBadge.textContent='Online';connBadge.classList.add('on')};
