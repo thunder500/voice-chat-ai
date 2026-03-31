@@ -366,7 +366,7 @@
         if (accessToken) options.headers['Authorization'] = 'Bearer ' + accessToken;
         let resp = await fetch(url, options);
         if (resp.status === 401) {
-            const refreshResp = await fetch('/api/auth/refresh', { method: 'POST' });
+            const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
             if (refreshResp.ok) {
                 const data = await refreshResp.json();
                 accessToken = data.access_token;
@@ -383,7 +383,7 @@
     async function checkAuth() {
         try {
             if (!accessToken) {
-                const refreshResp = await fetch('/api/auth/refresh', { method: 'POST' });
+                const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
                 if (refreshResp.ok) {
                     const data = await refreshResp.json();
                     accessToken = data.access_token;

@@ -184,7 +184,7 @@ async def register(data: dict):
     })
     response.set_cookie(
         "refresh_token", refresh_token,
-        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+        httponly=True, secure=False, samesite="lax", path="/", max_age=7 * 24 * 3600,
     )
     return response
 
@@ -216,7 +216,7 @@ async def login(data: dict):
     })
     response.set_cookie(
         "refresh_token", refresh_token,
-        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+        httponly=True, secure=False, samesite="lax", path="/", max_age=7 * 24 * 3600,
     )
     return response
 
@@ -315,7 +315,7 @@ async def google_callback(code: str = None, error: str = None):
     response = RedirectResponse(url=f"{FRONTEND_URL}/?token={access_token}")
     response.set_cookie(
         "refresh_token", refresh_token,
-        httponly=True, secure=False, samesite="lax", max_age=7 * 24 * 3600,
+        httponly=True, secure=False, samesite="lax", path="/", max_age=7 * 24 * 3600,
     )
     return response
 
