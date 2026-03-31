@@ -191,6 +191,23 @@
     </style>
 </head>
 <body>
+    <style>
+        .admin-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}
+        .stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center}
+        .stat-card .num{font-size:28px;font-weight:700;color:#8b5cf6}
+        .stat-card .label{font-size:12px;color:var(--text5);margin-top:4px}
+        .admin-users{max-height:300px;overflow-y:auto;margin-top:8px}
+        .admin-user-row{display:flex;align-items:center;gap:12px;padding:10px;border-bottom:1px solid var(--border);font-size:13px}
+        .admin-user-row:last-child{border-bottom:none}
+        .admin-user-row .name{font-weight:600;min-width:120px}
+        .admin-user-row .email{color:var(--text4);flex:1}
+        .admin-user-row .badge-admin{background:#8b5cf6;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px}
+        .admin-user-row .badge-user{background:var(--surface);color:var(--text5);padding:2px 8px;border-radius:10px;font-size:10px}
+        .admin-user-row .stats{color:var(--text5);font-size:11px;min-width:100px;text-align:right}
+        .admin-user-row .active-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+        .admin-user-row .active-dot.on{background:#4ade80}
+        .admin-user-row .active-dot.off{background:var(--text7)}
+    </style>
     <!-- Auth Overlay -->
     <div id="authOverlay" class="auth-overlay">
       <div class="auth-box">
@@ -312,6 +329,7 @@
                 <div class="user-dropdown-email" id="userDisplayEmail"></div>
                 <hr>
                 <button onclick="openSettings()">Settings</button>
+                <button id="adminBtn" style="display:none" onclick="openAdmin()">Admin Dashboard</button>
                 <button onclick="handleLogout()">Logout</button>
               </div>
             </div>
@@ -326,6 +344,17 @@
             <div style="font-size:36px;opacity:.3">&#127908;</div>
             <p>Real-time voice conversation</p>
             <p style="font-size:12px;color:var(--text8)">Click the orb or press Space to start</p>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard Modal -->
+    <div class="settings-overlay" id="adminOverlay" onclick="if(event.target===this)closeAdmin()">
+        <div class="settings-panel" style="max-width:700px">
+            <h2>Admin Dashboard</h2>
+            <div class="admin-stats" id="adminStats">Loading...</div>
+            <h3 style="margin-top:16px">Users</h3>
+            <div class="admin-users" id="adminUsers"></div>
+            <button class="icon-btn" style="margin-top:12px" onclick="closeAdmin()">Close</button>
         </div>
     </div>
 
@@ -455,6 +484,9 @@
             document.getElementById('userAvatar').style.display = 'block';
             document.getElementById('userInitials').style.display = 'none';
         }
+        if (currentUser.is_admin) {
+            document.getElementById('adminBtn').style.display = 'block';
+        }
     }
 
     function toggleUserDropdown() {
@@ -500,6 +532,46 @@
     async function deleteApiKey(provider) {
         await authFetch('/api/keys/' + provider, { method: 'DELETE' });
         loadApiKeys();
+    }
+
+    // ---- Admin Dashboard ----
+    function openAdmin() {
+        document.getElementById('adminOverlay').classList.add('open');
+        document.getElementById('userDropdown').style.display = 'none';
+        loadAdminStats();
+    }
+    function closeAdmin() {
+        document.getElementById('adminOverlay').classList.remove('open');
+    }
+    async function loadAdminStats() {
+        try {
+            const resp = await authFetch('/api/admin/stats');
+            if (!resp.ok) { document.getElementById('adminStats').innerHTML = '<p style="color:#ef4444">Access denied</p>'; return; }
+            const d = await resp.json();
+            document.getElementById('adminStats').innerHTML = `
+                <div class="stat-card"><div class="num">${d.total_users}</div><div class="label">Total Users</div></div>
+                <div class="stat-card"><div class="num">${d.active_24h}</div><div class="label">Active (24h)</div></div>
+                <div class="stat-card"><div class="num">${d.active_7d}</div><div class="label">Active (7 days)</div></div>
+                <div class="stat-card"><div class="num">${d.total_conversations}</div><div class="label">Conversations</div></div>
+                <div class="stat-card"><div class="num">${d.total_messages}</div><div class="label">Messages</div></div>
+                <div class="stat-card"><div class="num">${d.total_knowledge}</div><div class="label">Knowledge Entries</div></div>
+            `;
+            const now = new Date();
+            document.getElementById('adminUsers').innerHTML = d.users.map(u => {
+                const lastLogin = new Date(u.last_login);
+                const ago = Math.floor((now - lastLogin) / 60000);
+                const activeRecently = ago < 60;
+                const agoText = ago < 1 ? 'just now' : ago < 60 ? ago + 'm ago' : ago < 1440 ? Math.floor(ago/60) + 'h ago' : Math.floor(ago/1440) + 'd ago';
+                return `<div class="admin-user-row">
+                    <span class="active-dot ${activeRecently ? 'on' : 'off'}"></span>
+                    <span class="name">${u.name}</span>
+                    <span class="email">${u.email}</span>
+                    <span class="${u.is_admin ? 'badge-admin' : 'badge-user'}">${u.is_admin ? 'Admin' : 'User'}</span>
+                    <span class="stats">${u.conv_count} chats, ${u.msg_count} msgs</span>
+                    <span style="color:var(--text6);font-size:11px">${agoText}</span>
+                </div>`;
+            }).join('');
+        } catch(e) { document.getElementById('adminStats').innerHTML = '<p style="color:#ef4444">Error loading stats</p>'; }
     }
 
     // ---- State ----

@@ -151,6 +151,52 @@ async def health():
     return JSONResponse(content=status)
 
 
+# ---- Admin Dashboard ----
+@app.get("/api/admin/stats")
+async def admin_stats(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    user = await get_user_by_id(user_id)
+    if not user or not user.get("is_admin"):
+        return JSONResponse(content={"error": "Admin access required"}, status_code=403)
+
+    from db import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+        # Active = logged in within last 24h
+        active_24h = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE last_login > NOW() - INTERVAL '24 hours'"
+        )
+        # Active = logged in within last 7d
+        active_7d = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE last_login > NOW() - INTERVAL '7 days'"
+        )
+        total_conversations = await conn.fetchval("SELECT COUNT(*) FROM conversations")
+        total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages")
+        total_knowledge = await conn.fetchval("SELECT COUNT(*) FROM knowledge_base")
+
+        # User list with stats
+        users = await conn.fetch("""
+            SELECT u.id, u.email, u.name, u.auth_provider, u.is_admin, u.created_at, u.last_login,
+                   (SELECT COUNT(*) FROM conversations c WHERE c.user_id = u.id) as conv_count,
+                   (SELECT COUNT(*) FROM messages m JOIN conversations c ON m.conversation_id = c.id WHERE c.user_id = u.id) as msg_count
+            FROM users u ORDER BY u.last_login DESC
+        """)
+
+    from db import _serialize_row
+    return JSONResponse(content={
+        "total_users": total_users,
+        "active_24h": active_24h,
+        "active_7d": active_7d,
+        "total_conversations": total_conversations,
+        "total_messages": total_messages,
+        "total_knowledge": total_knowledge,
+        "users": [_serialize_row(r) for r in users],
+    })
+
+
 # ---- Auth Endpoints ----
 @app.post("/api/auth/register")
 async def register(data: dict):
@@ -252,6 +298,7 @@ async def get_me(request: Request):
         "name": user["name"],
         "avatar_url": user.get("avatar_url"),
         "auth_provider": user.get("auth_provider"),
+        "is_admin": bool(user.get("is_admin")),
     })
 
 

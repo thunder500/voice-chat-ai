@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
     avatar_url TEXT,
     auth_provider VARCHAR(20) DEFAULT 'local',
     google_id VARCHAR(255) UNIQUE,
+    is_admin BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW(),
     last_login TIMESTAMP DEFAULT NOW()
 );
