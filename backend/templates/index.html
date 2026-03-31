@@ -1115,18 +1115,30 @@
     }
 
     // ---- Model Switcher ----
+    const PROVIDER_ICONS = {openai:'⚡', anthropic:'🟣', groq:'🚀', google:'💎', ollama:'🦙'};
+    const PROVIDER_LABELS = {openai:'OpenAI', anthropic:'Claude', groq:'Groq', google:'Gemini', ollama:'Local'};
+    const PROVIDER_ORDER = ['openai','anthropic','groq','google','ollama'];
     async function loadModels(){
         try{
             const r=await authFetch('/api/models');const models=await r.json();
             const sel=document.getElementById('modelSelect');sel.innerHTML='';
-            // Sort: OpenAI first, then Ollama
-            models.sort((a,b)=>a.provider==='openai'?-1:1);
-            models.forEach(m=>{const o=document.createElement('option');o.value=m.name;
-            o.textContent=m.provider==='openai'?`⚡ ${m.name} (OpenAI)`:`🦙 ${m.name} (Local)`;
-            sel.appendChild(o)});
-            // Default to first OpenAI model if available
-            const openaiModel=models.find(m=>m.provider==='openai');
-            if(openaiModel)sel.value=openaiModel.name;
+            models.sort((a,b)=>{
+                const ai=PROVIDER_ORDER.indexOf(a.provider),bi=PROVIDER_ORDER.indexOf(b.provider);
+                return ai-bi;
+            });
+            let lastProvider='';
+            models.forEach(m=>{
+                if(m.provider!==lastProvider){
+                    const og=document.createElement('optgroup');
+                    og.label=`${PROVIDER_ICONS[m.provider]||''} ${PROVIDER_LABELS[m.provider]||m.provider}`;
+                    sel.appendChild(og);lastProvider=m.provider;
+                }
+                const o=document.createElement('option');o.value=m.name;
+                o.textContent=`${PROVIDER_ICONS[m.provider]||''} ${m.name}`;
+                sel.lastElementChild.appendChild(o);
+            });
+            const preferred=models.find(m=>m.provider==='openai')||models[0];
+            if(preferred)sel.value=preferred.name;
         }catch(e){}
     }
     function switchModel(name){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'set_model',model:name}))}
