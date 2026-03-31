@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, date
 import asyncpg
 
@@ -9,6 +10,8 @@ def _serialize_row(row) -> dict:
     for k, v in d.items():
         if isinstance(v, (datetime, date)):
             d[k] = v.isoformat()
+        elif isinstance(v, uuid.UUID):
+            d[k] = str(v)
     return d
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://voice:voice@postgres:5432/voicechat")
