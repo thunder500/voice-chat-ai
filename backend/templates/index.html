@@ -147,9 +147,105 @@
         .conv-empty{padding:20px 10px;font-size:12px;color:var(--text6);text-align:center}
         .sidebar-bg{position:fixed;inset:0;background:var(--overlay-mid);z-index:40;display:none}
         .sidebar-bg.open{display:block}
+
+        /* Auth Overlay */
+        .auth-overlay{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center}
+        .auth-overlay.hidden{display:none}
+        .auth-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:400px;text-align:center}
+        .auth-box h2{color:#8b5cf6;margin-bottom:4px;font-size:24px}
+        .auth-sub{color:var(--text5);font-size:13px;margin-bottom:24px}
+        .auth-tabs{display:flex;gap:0;margin-bottom:20px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+        .auth-tab{flex:1;padding:8px;background:transparent;border:none;color:var(--text4);cursor:pointer;font-size:14px}
+        .auth-tab.active{background:#8b5cf6;color:#fff}
+        .auth-form{display:flex;flex-direction:column;gap:12px}
+        .auth-form input{background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:12px 16px;border-radius:8px;font-size:14px;outline:none}
+        .auth-form input:focus{border-color:#8b5cf6}
+        .auth-submit{background:#8b5cf6;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600}
+        .auth-submit:hover{background:#7c3aed}
+        .auth-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--text6);font-size:12px}
+        .auth-divider::before,.auth-divider::after{content:'';flex:1;height:1px;background:var(--border)}
+        .google-btn{display:block;padding:12px;border:1px solid var(--border);border-radius:8px;color:var(--text);text-decoration:none;font-size:14px;transition:all .2s}
+        .google-btn:hover{border-color:#8b5cf6;background:var(--surface-hover)}
+        .auth-error{color:#ef4444;font-size:13px;margin-top:12px;min-height:20px}
+        /* User Menu */
+        .user-menu{position:relative;display:flex;align-items:center}
+        .user-avatar{width:32px;height:32px;border-radius:50%;background:#8b5cf6;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;overflow:hidden}
+        .user-avatar img{width:100%;height:100%;object-fit:cover}
+        .user-dropdown{position:absolute;top:40px;right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;min-width:200px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+        .user-dropdown-name{font-weight:600;font-size:14px}
+        .user-dropdown-email{font-size:12px;color:var(--text5);margin-bottom:8px}
+        .user-dropdown hr{border:none;border-top:1px solid var(--border);margin:8px 0}
+        .user-dropdown button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--text3);padding:6px 0;cursor:pointer;font-size:13px}
+        .user-dropdown button:hover{color:#8b5cf6}
+        /* API Keys */
+        .key-card{display:flex;align-items:center;gap:12px;padding:10px;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+        .key-provider{font-weight:600;text-transform:capitalize;min-width:80px}
+        .key-masked{color:var(--text5);font-family:monospace;flex:1}
+        .key-delete{background:#ef4444;color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+        .add-key-form{display:flex;gap:8px;margin-top:12px}
+        .add-key-form select,.add-key-form input{background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;font-size:13px}
+        .add-key-form input{flex:1}
+        .add-key-form button{background:#8b5cf6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap}
+        .settings-hint{font-size:12px;color:var(--text5);margin-bottom:12px}
+        .no-keys{color:var(--text6);font-size:13px;font-style:italic}
     </style>
 </head>
 <body>
+    <style>
+        .admin-panel{max-width:800px!important;max-height:85vh;overflow-y:auto}
+        .admin-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+        .admin-header h2{color:#8b5cf6;margin:0;font-size:22px}
+        .admin-close{background:none;border:1px solid var(--border);color:var(--text4);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+        .admin-close:hover{border-color:#8b5cf6;color:#8b5cf6}
+        .admin-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+        .stat-card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;transition:border-color .2s}
+        .stat-card:hover{border-color:#8b5cf6}
+        .stat-card .num{font-size:32px;font-weight:700;color:#8b5cf6;line-height:1}
+        .stat-card .label{font-size:11px;color:var(--text5);margin-top:6px;text-transform:uppercase;letter-spacing:.5px}
+        .admin-section-title{font-size:14px;font-weight:600;color:var(--text3);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+        .admin-section-title span{background:var(--surface);padding:2px 10px;border-radius:10px;font-size:11px;color:var(--text5);font-weight:400}
+        .admin-users{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+        .admin-user-header{display:grid;grid-template-columns:28px 1fr 1fr 70px 120px 70px;gap:8px;padding:10px 16px;background:var(--surface);font-size:11px;color:var(--text5);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+        .admin-user-row{display:grid;grid-template-columns:28px 1fr 1fr 70px 120px 70px;gap:8px;padding:12px 16px;border-top:1px solid var(--border);font-size:13px;align-items:center;transition:background .15s}
+        .admin-user-row:hover{background:var(--surface-hover)}
+        .admin-user-row .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .admin-user-row .email{color:var(--text4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .badge-admin{background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;padding:3px 10px;border-radius:10px;font-size:10px;font-weight:600;text-align:center}
+        .badge-user{background:var(--surface);color:var(--text5);padding:3px 10px;border-radius:10px;font-size:10px;text-align:center}
+        .admin-user-row .stats{color:var(--text4);font-size:12px;text-align:center}
+        .admin-user-row .last-seen{color:var(--text5);font-size:11px;text-align:right}
+        .active-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin:0 auto}
+        .active-dot.on{background:#4ade80;box-shadow:0 0 8px rgba(74,222,128,.5)}
+        .active-dot.off{background:var(--text7)}
+    </style>
+    <!-- Auth Overlay -->
+    <div id="authOverlay" class="auth-overlay hidden">
+      <div class="auth-box">
+        <h2>Voice Chat AI</h2>
+        <p class="auth-sub">Talk to any AI model with your voice</p>
+        <div class="auth-tabs">
+          <button class="auth-tab active" onclick="showAuthTab('login')">Login</button>
+          <button class="auth-tab" onclick="showAuthTab('register')">Register</button>
+        </div>
+        <form id="loginForm" class="auth-form" onsubmit="return handleLogin(event)">
+          <input type="email" id="loginEmail" placeholder="Email" required>
+          <input type="password" id="loginPassword" placeholder="Password" required minlength="6">
+          <button type="submit" class="auth-submit">Log In</button>
+        </form>
+        <form id="registerForm" class="auth-form" style="display:none" onsubmit="return handleRegister(event)">
+          <input type="text" id="regName" placeholder="Your name" required>
+          <input type="email" id="regEmail" placeholder="Email" required>
+          <input type="password" id="regPassword" placeholder="Password (min 6 chars)" required minlength="6">
+          <button type="submit" class="auth-submit">Create Account</button>
+        </form>
+        <div id="googleAuthBtn">
+          <div class="auth-divider"><span>or</span></div>
+          <a href="/api/auth/google" class="google-btn">Sign in with Google</a>
+        </div>
+        <div id="authError" class="auth-error"></div>
+      </div>
+    </div>
+
     <!-- Permission -->
     <div class="perm-overlay" id="permOverlay">
         <div class="perm-card">
@@ -168,6 +264,7 @@
             <div class="tab-bar">
                 <button class="tab-btn active" onclick="switchTab('personas',this)">Personality</button>
                 <button class="tab-btn" onclick="switchTab('knowledge',this)">Knowledge Base</button>
+                <button class="tab-btn" onclick="switchTab('apikeys',this)">API Keys</button>
                 <button class="tab-btn" onclick="switchTab('danger',this)">Data</button>
             </div>
             <div class="tab-content active" id="tab-personas">
@@ -187,6 +284,23 @@
                 <input class="kb-title-input" id="kbTitle" placeholder="Title...">
                 <textarea class="kb-text" id="kbText" placeholder="Paste knowledge text here..."></textarea>
                 <button class="small-btn" onclick="addKBText()">Add Text</button>
+            </div>
+            <div class="tab-content" id="tab-apikeys">
+                <div class="settings-section">
+                  <h3>API Keys</h3>
+                  <p class="settings-hint">Add your own API keys to use different AI providers. Keys are encrypted and stored securely.</p>
+                  <div id="apiKeysContainer"></div>
+                  <div class="add-key-form">
+                    <select id="keyProvider">
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google AI</option>
+                      <option value="groq">Groq</option>
+                    </select>
+                    <input type="password" id="keyInput" placeholder="Paste your API key">
+                    <button onclick="saveApiKey()">Test &amp; Save</button>
+                  </div>
+                </div>
             </div>
             <div class="tab-content" id="tab-danger">
                 <p style="color:var(--text4);font-size:13px;margin-bottom:16px">Manage your conversation data.</p>
@@ -215,6 +329,20 @@
             <select class="model-select" id="voiceSelect" onchange="switchVoice(this.value)"></select>
             <select class="model-select" id="modelSelect" onchange="switchModel(this.value)"></select>
             <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">&#9728;</button>
+            <div id="userMenu" class="user-menu" style="display:none">
+              <button class="user-avatar" onclick="toggleUserDropdown()">
+                <img id="userAvatar" src="" alt="" style="display:none">
+                <span id="userInitials"></span>
+              </button>
+              <div id="userDropdown" class="user-dropdown" style="display:none">
+                <div class="user-dropdown-name" id="userDisplayName"></div>
+                <div class="user-dropdown-email" id="userDisplayEmail"></div>
+                <hr>
+                <button onclick="openSettings()">Settings</button>
+                <button id="adminBtn" style="display:none" onclick="openAdmin()">Admin Dashboard</button>
+                <button onclick="handleLogout()">Logout</button>
+              </div>
+            </div>
             <button class="icon-btn" id="settingsBtn" onclick="toggleSettings()">&#9881; Settings</button>
             <span class="badge" id="connBadge">Offline</span>
         </div>
@@ -226,6 +354,28 @@
             <div style="font-size:36px;opacity:.3">&#127908;</div>
             <p>Real-time voice conversation</p>
             <p style="font-size:12px;color:var(--text8)">Click the orb or press Space to start</p>
+        </div>
+    </div>
+
+    <!-- Admin Dashboard Modal -->
+    <div class="settings-overlay" id="adminOverlay" onclick="if(event.target===this)closeAdmin()">
+        <div class="settings-panel admin-panel">
+            <div class="admin-header">
+                <h2>Admin Dashboard</h2>
+                <button class="admin-close" onclick="closeAdmin()">&times;</button>
+            </div>
+            <div class="admin-stats" id="adminStats">
+                <div class="stat-card"><div class="num">-</div><div class="label">Loading...</div></div>
+                <div class="stat-card"><div class="num">-</div><div class="label"></div></div>
+                <div class="stat-card"><div class="num">-</div><div class="label"></div></div>
+            </div>
+            <div class="admin-section-title">Users <span id="adminUserCount">0</span></div>
+            <div class="admin-users">
+                <div class="admin-user-header">
+                    <div></div><div>Name</div><div>Email</div><div>Role</div><div>Activity</div><div>Last seen</div>
+                </div>
+                <div id="adminUserList"></div>
+            </div>
         </div>
     </div>
 
@@ -249,6 +399,207 @@
     </div>
 
     <script>
+    // ---- Auth State ----
+    let accessToken = null;
+    let currentUser = null;
+
+    // Check for token in URL (Google OAuth redirect)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('token');
+    if (urlToken) {
+        accessToken = urlToken;
+        window.history.replaceState({}, '', '/');
+    }
+
+    async function authFetch(url, options = {}) {
+        if (!options.headers) options.headers = {};
+        if (accessToken) options.headers['Authorization'] = 'Bearer ' + accessToken;
+        let resp = await fetch(url, options);
+        if (resp.status === 401) {
+            const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+            if (refreshResp.ok) {
+                const data = await refreshResp.json();
+                accessToken = data.access_token;
+                options.headers['Authorization'] = 'Bearer ' + accessToken;
+                resp = await fetch(url, options);
+            } else {
+                showAuthOverlay();
+                throw new Error('Not authenticated');
+            }
+        }
+        return resp;
+    }
+
+    async function checkAuth() {
+        try {
+            if (!accessToken) {
+                const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' });
+                if (refreshResp.ok) {
+                    const data = await refreshResp.json();
+                    accessToken = data.access_token;
+                }
+            }
+            if (!accessToken) { showAuthOverlay(); return; }
+            const resp = await authFetch('/api/auth/me');
+            if (resp.ok) {
+                currentUser = await resp.json();
+                hideAuthOverlay();
+                updateUserMenu();
+                loadConversations(); loadModels(); loadVoices(); loadPersonas();
+                if(ws) ws.close(); connectWS();
+            } else { showAuthOverlay(); }
+        } catch { showAuthOverlay(); }
+    }
+
+    function showAuthOverlay() { document.getElementById('authOverlay').classList.remove('hidden'); }
+    function hideAuthOverlay() { document.getElementById('authOverlay').classList.add('hidden'); }
+
+    function showAuthTab(tab) {
+        document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+        event.target.classList.add('active');
+        document.getElementById('loginForm').style.display = tab === 'login' ? 'flex' : 'none';
+        document.getElementById('registerForm').style.display = tab === 'register' ? 'flex' : 'none';
+        document.getElementById('authError').textContent = '';
+    }
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        const resp = await fetch('/api/auth/login', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ email: document.getElementById('loginEmail').value, password: document.getElementById('loginPassword').value })
+        });
+        const data = await resp.json();
+        if (resp.ok) { accessToken = data.access_token; currentUser = data.user; hideAuthOverlay(); updateUserMenu(); loadConversations(); loadModels(); loadVoices(); loadPersonas(); if(ws) ws.close(); connectWS(); }
+        else { document.getElementById('authError').textContent = data.error; }
+        return false;
+    }
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        const resp = await fetch('/api/auth/register', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: document.getElementById('regName').value, email: document.getElementById('regEmail').value, password: document.getElementById('regPassword').value })
+        });
+        const data = await resp.json();
+        if (resp.ok) { accessToken = data.access_token; currentUser = data.user; hideAuthOverlay(); updateUserMenu(); loadConversations(); loadModels(); loadVoices(); loadPersonas(); if(ws) ws.close(); connectWS(); }
+        else { document.getElementById('authError').textContent = data.error; }
+        return false;
+    }
+
+    async function handleLogout() {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        accessToken = null; currentUser = null;
+        document.getElementById('userMenu').style.display = 'none';
+        showAuthOverlay();
+    }
+
+    function updateUserMenu() {
+        if (!currentUser) return;
+        document.getElementById('userMenu').style.display = 'flex';
+        document.getElementById('userDisplayName').textContent = currentUser.name;
+        document.getElementById('userDisplayEmail').textContent = currentUser.email;
+        const initials = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        document.getElementById('userInitials').textContent = initials;
+        if (currentUser.avatar_url) {
+            document.getElementById('userAvatar').src = currentUser.avatar_url;
+            document.getElementById('userAvatar').style.display = 'block';
+            document.getElementById('userInitials').style.display = 'none';
+        }
+        if (currentUser.is_admin) {
+            document.getElementById('adminBtn').style.display = 'block';
+        }
+    }
+
+    function toggleUserDropdown() {
+        const dd = document.getElementById('userDropdown');
+        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('userMenu');
+        const dd = document.getElementById('userDropdown');
+        if (menu && !menu.contains(e.target)) dd.style.display = 'none';
+    });
+
+    function openSettings() {
+        document.getElementById('userDropdown').style.display = 'none';
+        toggleSettings();
+    }
+
+    // API Keys management
+    async function loadApiKeys() {
+        try {
+            const resp = await authFetch('/api/keys');
+            const keys = await resp.json();
+            document.getElementById('apiKeysContainer').innerHTML = keys.map(k =>
+                '<div class="key-card"><span class="key-provider">' + k.provider + '</span><span class="key-masked">' + k.masked_key + '</span><button class="key-delete" onclick="deleteApiKey(\'' + k.provider + '\')">Remove</button></div>'
+            ).join('') || '<p class="no-keys">No API keys saved yet.</p>';
+        } catch {}
+    }
+
+    async function saveApiKey() {
+        const provider = document.getElementById('keyProvider').value;
+        const key = document.getElementById('keyInput').value;
+        if (!key) return;
+        const testResp = await authFetch('/api/keys/test', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ provider, key }) });
+        const testResult = await testResp.json();
+        if (!testResult.valid) { alert('Key invalid: ' + (testResult.error || 'Unknown')); return; }
+        await authFetch('/api/keys', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ provider, key }) });
+        document.getElementById('keyInput').value = '';
+        loadApiKeys();
+    }
+
+    async function deleteApiKey(provider) {
+        await authFetch('/api/keys/' + provider, { method: 'DELETE' });
+        loadApiKeys();
+    }
+
+    // ---- Admin Dashboard ----
+    function openAdmin() {
+        document.getElementById('adminOverlay').classList.add('open');
+        document.getElementById('userDropdown').style.display = 'none';
+        loadAdminStats();
+    }
+    function closeAdmin() {
+        document.getElementById('adminOverlay').classList.remove('open');
+    }
+    async function loadAdminStats() {
+        try {
+            const resp = await authFetch('/api/admin/stats');
+            if (!resp.ok) {
+                document.getElementById('adminStats').innerHTML = '<div class="stat-card" style="grid-column:1/-1"><div class="num" style="color:#ef4444;font-size:18px">Access denied</div><div class="label">Admin privileges required</div></div>';
+                document.getElementById('adminUserList').innerHTML = '';
+                return;
+            }
+            const d = await resp.json();
+            document.getElementById('adminStats').innerHTML = `
+                <div class="stat-card"><div class="num">${d.total_users}</div><div class="label">Total Users</div></div>
+                <div class="stat-card"><div class="num">${d.active_24h}</div><div class="label">Active 24h</div></div>
+                <div class="stat-card"><div class="num">${d.active_7d}</div><div class="label">Active 7d</div></div>
+                <div class="stat-card"><div class="num">${d.total_conversations}</div><div class="label">Conversations</div></div>
+                <div class="stat-card"><div class="num">${d.total_messages}</div><div class="label">Messages</div></div>
+                <div class="stat-card"><div class="num">${d.total_knowledge}</div><div class="label">Knowledge</div></div>
+            `;
+            document.getElementById('adminUserCount').textContent = d.total_users;
+            const now = new Date();
+            document.getElementById('adminUserList').innerHTML = d.users.map(u => {
+                const lastLogin = new Date(u.last_login);
+                const ago = Math.floor((now - lastLogin) / 60000);
+                const activeRecently = ago < 60;
+                const agoText = ago < 1 ? 'now' : ago < 60 ? ago + 'm' : ago < 1440 ? Math.floor(ago/60) + 'h' : Math.floor(ago/1440) + 'd';
+                return `<div class="admin-user-row">
+                    <div><span class="active-dot ${activeRecently ? 'on' : 'off'}"></span></div>
+                    <div class="name">${u.name}</div>
+                    <div class="email">${u.email}</div>
+                    <div><span class="${u.is_admin ? 'badge-admin' : 'badge-user'}">${u.is_admin ? 'Admin' : 'User'}</span></div>
+                    <div class="stats">${u.conv_count} chats / ${u.msg_count} msgs</div>
+                    <div class="last-seen">${agoText} ago</div>
+                </div>`;
+            }).join('');
+        } catch(e) { document.getElementById('adminStats').innerHTML = '<div class="stat-card" style="grid-column:1/-1"><div class="num" style="color:#ef4444;font-size:16px">Error</div></div>'; }
+    }
+
     // ---- State ----
     let ws=null, isActive=false, convId=null, isAiSpeaking=false;
     let recognition=null, recogActive=false, finalTranscript="";
@@ -276,8 +627,9 @@
 
     // ---- WebSocket ----
     function connectWS(){
+        if(!accessToken) return;
         const p=location.protocol==='https:'?'wss:':'ws:';
-        ws=new WebSocket(`${p}//${location.host}/ws`);
+        ws=new WebSocket(`${p}//${location.host}/ws?token=${accessToken}`);
         ws.onopen=()=>{connBadge.textContent='Online';connBadge.classList.add('on')};
         ws.onclose=()=>{connBadge.textContent='Offline';connBadge.classList.remove('on');if(isActive)stopConvo();setTimeout(connectWS,3000)};
         ws.onmessage=(e)=>{
@@ -765,7 +1117,7 @@
     // ---- Model Switcher ----
     async function loadModels(){
         try{
-            const r=await fetch('/api/models');const models=await r.json();
+            const r=await authFetch('/api/models');const models=await r.json();
             const sel=document.getElementById('modelSelect');sel.innerHTML='';
             // Sort: OpenAI first, then Ollama
             models.sort((a,b)=>a.provider==='openai'?-1:1);
@@ -778,12 +1130,11 @@
         }catch(e){}
     }
     function switchModel(name){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'set_model',model:name}))}
-    loadModels();
 
     // ---- Voice Selector ----
     async function loadVoices(){
         try{
-            const r=await fetch('/api/voices');const voices=await r.json();
+            const r=await authFetch('/api/voices');const voices=await r.json();
             const sel=document.getElementById('voiceSelect');sel.innerHTML='';
             voices.forEach(v=>{
                 const o=document.createElement('option');
@@ -794,13 +1145,12 @@
         }catch(e){}
     }
     function switchVoice(id){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'set_voice',voice:id}))}
-    loadVoices();
 
     // ---- Personas ----
     let activePersonaId=null;
     async function loadPersonas(){
         try{
-            const r=await fetch('/api/personas');const list=await r.json();
+            const r=await authFetch('/api/personas');const list=await r.json();
             const grid=document.getElementById('personaGrid');grid.innerHTML='';
             list.forEach(p=>{
                 const c=document.createElement('div');c.className='persona-card'+(p.id===activePersonaId?' active':'');
@@ -821,19 +1171,18 @@
         const name=document.getElementById('newPersonaName').value.trim();
         const prompt=document.getElementById('newPersonaPrompt').value.trim();
         if(!name||!prompt)return;
-        await fetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,prompt})});
+        await authFetch('/api/personas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,prompt})});
         document.getElementById('newPersonaName').value='';document.getElementById('newPersonaPrompt').value='';
         loadPersonas();
     }
     async function delPersona(id){
-        await fetch('/api/personas/'+id,{method:'DELETE'});loadPersonas();
+        await authFetch('/api/personas/'+id,{method:'DELETE'});loadPersonas();
     }
-    loadPersonas();
 
     // ---- Knowledge Base ----
     async function loadKB(){
         try{
-            const r=await fetch('/api/knowledge');const list=await r.json();
+            const r=await authFetch('/api/knowledge');const list=await r.json();
             const el=document.getElementById('kbList');el.innerHTML='';
             list.forEach(k=>{
                 el.innerHTML+='<div class="kb-item"><div><div class="kb-title">'+escHtml(k.title)+'</div><div class="kb-type">'+k.file_type+' &bull; '+k.content.length+' chars</div></div><button class="kb-del" onclick="delKB('+k.id+')">&times;</button></div>';
@@ -845,23 +1194,22 @@
         const content=document.getElementById('kbText').value.trim();
         if(!content)return;
         const fd=new FormData();fd.append('title',title);fd.append('content',content);
-        await fetch('/api/knowledge',{method:'POST',body:fd});
+        await authFetch('/api/knowledge',{method:'POST',body:fd});
         document.getElementById('kbTitle').value='';document.getElementById('kbText').value='';
         loadKB();
     }
     async function uploadKBFile(input){
         if(!input.files[0])return;
         const fd=new FormData();fd.append('title',input.files[0].name);fd.append('file',input.files[0]);
-        await fetch('/api/knowledge',{method:'POST',body:fd});
+        await authFetch('/api/knowledge',{method:'POST',body:fd});
         input.value='';loadKB();
     }
-    async function delKB(id){await fetch('/api/knowledge/'+id,{method:'DELETE'});loadKB()}
-    loadKB();
+    async function delKB(id){await authFetch('/api/knowledge/'+id,{method:'DELETE'});loadKB()}
 
     // ---- Settings Panel ----
     async function clearAllConversations(){
         if(!confirm('Delete ALL conversations? This cannot be undone.'))return;
-        await fetch('/api/conversations',{method:'DELETE'});
+        await authFetch('/api/conversations',{method:'DELETE'});
         convId=null;
         chatBox.innerHTML='<div class="empty-state" id="emptyState"><div style="font-size:36px;opacity:.3">&#127908;</div><p>Real-time voice conversation</p></div>';
         loadConvList();
@@ -870,7 +1218,7 @@
 
     function toggleSettings(){
         document.getElementById('settingsOverlay').classList.toggle('open');
-        loadPersonas();loadKB();
+        loadPersonas();loadKB();loadApiKeys();
     }
     function switchTab(name,btn){
         document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
@@ -910,7 +1258,7 @@
                 e.stopPropagation();
                 const newTitle=prompt('Rename conversation:',c.title);
                 if(newTitle&&newTitle.trim()){
-                    fetch('/api/conversations/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle.trim()})}).then(()=>loadConvList());
+                    authFetch('/api/conversations/'+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:newTitle.trim()})}).then(()=>loadConvList());
                 }
             };
             const star=document.createElement('button');
@@ -939,18 +1287,19 @@
         unstarred.forEach(renderItem);
     }
     async function toggleStar(id){
-        await fetch('/api/conversations/'+id+'/star',{method:'PATCH'});
+        await authFetch('/api/conversations/'+id+'/star',{method:'PATCH'});
         const q=document.getElementById('convSearch').value.trim();
         if(q){
-            const r=await fetch('/api/conversations/search?q='+encodeURIComponent(q));
+            const r=await authFetch('/api/conversations/search?q='+encodeURIComponent(q));
             renderConvList(await r.json(), q);
         } else {
             loadConvList();
         }
     }
+    async function loadConversations(){return loadConvList()}
     async function loadConvList(){
         try{
-            const r=await fetch('/api/conversations');const list=await r.json();
+            const r=await authFetch('/api/conversations');const list=await r.json();
             renderConvList(list, '');
         }catch(e){}
     }
@@ -960,14 +1309,14 @@
         searchDebounce=setTimeout(async()=>{
             try{
                 const url=q.trim()?'/api/conversations/search?q='+encodeURIComponent(q.trim()):'/api/conversations';
-                const r=await fetch(url);const list=await r.json();
+                const r=await authFetch(url);const list=await r.json();
                 renderConvList(list, q.trim());
             }catch(e){}
         },200);
     }
     async function loadConv(id){
         try{
-            const r=await fetch('/api/conversations/'+id);const msgs=await r.json();
+            const r=await authFetch('/api/conversations/'+id);const msgs=await r.json();
             chatBox.innerHTML='';msgs.forEach(m=>addMsg(m.role,m.content));convId=id;
             // Tell backend to load this conversation's history into AI memory
             if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'load_conversation',id:id}));
@@ -981,7 +1330,8 @@
     updateThemeBtn(document.documentElement.getAttribute('data-theme')||'dark');
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change',e=>{if(!localStorage.getItem('theme')){const t=e.matches?'light':'dark';t==='light'?document.documentElement.setAttribute('data-theme','light'):document.documentElement.removeAttribute('data-theme');updateThemeBtn(t)}});
 
-    loadConvList();
+    // Initialize: check auth first, data loads after auth succeeds
+    checkAuth();
     </script>
 </body>
 </html>
