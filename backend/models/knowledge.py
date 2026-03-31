@@ -1,4 +1,4 @@
-from db import get_pool
+from db import get_pool, _serialize_row
 
 
 async def add_knowledge(user_id: str, title: str, content: str, file_type: str = "text") -> int:
@@ -18,7 +18,7 @@ async def get_all_knowledge(user_id: str) -> list[dict]:
             "SELECT id, title, content, file_type, created_at FROM knowledge_base WHERE user_id = $1::uuid ORDER BY created_at DESC",
             user_id,
         )
-        return [dict(r) for r in rows]
+        return [_serialize_row(r) for r in rows]
 
 
 async def delete_knowledge(user_id: str, kid: int):
@@ -40,6 +40,6 @@ async def search_knowledge(user_id: str, query: str, limit: int = 3) -> list[dic
         content_lower = row["content"].lower()
         score = sum(1 for w in words if w in content_lower)
         if score > 0:
-            scored.append((score, dict(row)))
+            scored.append((score, _serialize_row(row)))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:limit]]

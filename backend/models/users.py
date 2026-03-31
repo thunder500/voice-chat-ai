@@ -1,4 +1,4 @@
-from db import get_pool
+from db import get_pool, _serialize_row
 
 
 async def create_user(email: str, name: str, password_hash: str | None = None,

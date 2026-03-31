@@ -1,4 +1,4 @@
-from db import get_pool
+from db import get_pool, _serialize_row
 from crypto import encrypt_key, decrypt_key
 
 

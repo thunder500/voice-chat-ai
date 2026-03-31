@@ -13,7 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, F
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from faster_whisper import WhisperModel
 
-from db import init_db, close_db
+from db import init_db, close_db, DEFAULT_KNOWLEDGE
 from models import (
     create_user, get_user_by_email, get_user_by_id,
     get_user_by_google_id, update_last_login, link_google_account,
@@ -170,6 +170,10 @@ async def register(data: dict):
     user = await create_user(email=email, name=name, password_hash=hash_password(password))
     user_id = str(user["id"])
 
+    # Seed default knowledge base for new user
+    for kb in DEFAULT_KNOWLEDGE:
+        await add_knowledge(user_id, kb["title"], kb["content"], kb["file_type"])
+
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
 
@@ -297,6 +301,10 @@ async def google_callback(code: str = None, error: str = None):
                 email=email, name=name,
                 auth_provider="google", google_id=google_id, avatar_url=avatar_url,
             )
+            # Seed default knowledge for new Google user
+            new_uid = str(user["id"])
+            for kb in DEFAULT_KNOWLEDGE:
+                await add_knowledge(new_uid, kb["title"], kb["content"], kb["file_type"])
 
     user_id = str(user["id"])
     await update_last_login(user_id)

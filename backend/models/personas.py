@@ -1,4 +1,4 @@
-from db import get_pool
+from db import get_pool, _serialize_row
 
 
 async def get_personas(user_id: str) -> list[dict]:
@@ -10,14 +10,14 @@ async def get_personas(user_id: str) -> list[dict]:
                ORDER BY is_default DESC, created_at ASC""",
             user_id,
         )
-        return [dict(r) for r in rows]
+        return [_serialize_row(r) for r in rows]
 
 
 async def get_persona(persona_id: int) -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM personas WHERE id = $1", persona_id)
-        return dict(row) if row else None
+        return _serialize_row(row) if row else None
 
 
 async def add_persona(user_id: str, name: str, prompt: str) -> int:

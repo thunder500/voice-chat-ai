@@ -1,4 +1,4 @@
-from db import get_pool
+from db import get_pool, _serialize_row
 
 
 async def create_conversation(user_id: str, title: str = "New Conversation") -> int:
@@ -35,7 +35,7 @@ async def get_conversations(user_id: str) -> list[dict]:
                WHERE user_id = $1::uuid ORDER BY starred DESC, created_at DESC""",
             user_id,
         )
-        return [dict(r) for r in rows]
+        return [_serialize_row(r) for r in rows]
 
 
 async def get_conversation_messages(conversation_id: int) -> list[dict]:
@@ -45,7 +45,7 @@ async def get_conversation_messages(conversation_id: int) -> list[dict]:
             "SELECT id, role, content, created_at FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC",
             conversation_id,
         )
-        return [dict(r) for r in rows]
+        return [_serialize_row(r) for r in rows]
 
 
 async def clear_conversations(user_id: str):
@@ -66,7 +66,7 @@ async def search_conversations(user_id: str, query: str) -> list[dict]:
                ORDER BY c.starred DESC, c.created_at DESC""",
             user_id, pattern,
         )
-        return [dict(r) for r in rows]
+        return [_serialize_row(r) for r in rows]
 
 
 async def toggle_star_conversation(conversation_id: int) -> bool:
