@@ -628,16 +628,33 @@
             const displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
             if(displayStream.getAudioTracks().length===0){
                 displayStream.getTracks().forEach(t=>t.stop());
-                alert('No audio detected! Check "Share tab audio" when sharing.');
+                alert('No audio detected! Make sure to check "Share tab audio" in the share dialog.');
                 return;
             }
             const micStream=await navigator.mediaDevices.getUserMedia({audio:true});
-            const audioCtx=new AudioContext();
+
+            // Mix tab audio + mic into one stream using AudioContext
+            // Use specific sample rate for consistency
+            const audioCtx=new AudioContext({sampleRate:16000});
             const dest=audioCtx.createMediaStreamDestination();
-            audioCtx.createMediaStreamSource(displayStream).connect(dest);
-            audioCtx.createMediaStreamSource(micStream).connect(dest);
+
+            // Tab audio — boost volume (tab capture is often quiet)
+            const tabSource=audioCtx.createMediaStreamSource(displayStream);
+            const tabGain=audioCtx.createGain();
+            tabGain.gain.value=2.0; // Boost tab audio
+            tabSource.connect(tabGain);
+            tabGain.connect(dest);
+
+            // Mic audio
+            const micSource=audioCtx.createMediaStreamSource(micStream);
+            const micGain=audioCtx.createGain();
+            micGain.gain.value=1.5;
+            micSource.connect(micGain);
+            micGain.connect(dest);
+
             meetingStream={display:displayStream,mic:micStream,ctx:audioCtx,destStream:dest.stream};
             meetingRecordingActive=true;
+            meetingStopCount=0;
             ws.send(JSON.stringify({type:'meeting_start'}));
             _meetingRecordChunk();
             document.getElementById('meetingModal').style.display='flex';
@@ -649,18 +666,23 @@
             meetingSeconds=0;meetingPaused=false;
             meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
             displayStream.getVideoTracks()[0].onended=()=>stopMeeting();
+            console.log('Meeting recording started. Tab audio tracks:',displayStream.getAudioTracks().length,'Mic tracks:',micStream.getAudioTracks().length);
         }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Share a browser tab with audio enabled.')}
     }
 
     function _meetingRecordChunk(){
         if(!meetingRecordingActive||!meetingStream)return;
         if(meetingPaused){setTimeout(_meetingRecordChunk,500);return}
-        const rec=new MediaRecorder(meetingStream.destStream,{mimeType:'audio/webm;codecs=opus'});
+        // Use audio/webm — let browser choose best codec
+        let mimeType='audio/webm;codecs=opus';
+        if(!MediaRecorder.isTypeSupported(mimeType))mimeType='audio/webm';
+        const rec=new MediaRecorder(meetingStream.destStream,{mimeType:mimeType,audioBitsPerSecond:64000});
         const parts=[];
         rec.ondataavailable=(e)=>{if(e.data.size>0)parts.push(e.data)};
         rec.onstop=()=>{
             if(parts.length>0){
                 const blob=new Blob(parts,{type:'audio/webm'});
+                console.log('Meeting chunk:',blob.size,'bytes');
                 blob.arrayBuffer().then(buf=>{if(ws&&ws.readyState===1)ws.send(buf)}).catch(()=>{});
             }
             if(meetingRecordingActive)_meetingRecordChunk();
@@ -676,7 +698,11 @@
         if(!meetingPaused)_meetingRecordChunk();
     }
 
+    let meetingStopCount=0;
     function stopMeeting(){
+        // Prevent multiple calls (tab share end + button click can fire together)
+        if(!meetingRecordingActive&&meetingStopCount>0)return;
+        meetingStopCount++;
         meetingRecordingActive=false;
         if(meetingStream){
             meetingStream.display.getTracks().forEach(t=>t.stop());
