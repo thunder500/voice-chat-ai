@@ -1637,10 +1637,37 @@
                 const date=new Date(m.created_at).toLocaleDateString();
                 const mins=Math.floor((m.duration_seconds||0)/60);
                 const actions=(m.action_items||[]).length;
-                return '<div class="conv-item" onclick="viewMeeting('+m.id+')"><div style="font-weight:600;font-size:13px">'+(m.title||'Untitled')+'</div><div style="font-size:11px;color:var(--text5)">'+date+' · '+mins+'min · '+actions+' actions</div></div>';
+                return '<div class="conv-item" style="display:flex;align-items:center;gap:8px">'+
+                    '<div style="flex:1;cursor:pointer" onclick="viewMeeting('+m.id+')">'+
+                        '<div style="font-weight:600;font-size:13px">'+(m.title||'Untitled')+'</div>'+
+                        '<div style="font-size:11px;color:var(--text5)">'+date+' · '+mins+'min · '+actions+' actions</div>'+
+                    '</div>'+
+                    '<div style="position:relative">'+
+                        '<button onclick="event.stopPropagation();toggleMeetingMenu('+m.id+')" style="background:none;border:none;color:var(--text5);cursor:pointer;font-size:18px;padding:4px 8px;border-radius:4px">&#8942;</button>'+
+                        '<div id="meeting-menu-'+m.id+'" style="display:none;position:absolute;right:0;top:24px;background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:50;min-width:120px">'+
+                            '<button onclick="event.stopPropagation();deleteMeeting('+m.id+')" style="display:block;width:100%;text-align:left;background:none;border:none;color:#ef4444;padding:8px 12px;cursor:pointer;font-size:12px">Delete</button>'+
+                        '</div>'+
+                    '</div>'+
+                '</div>';
             }).join('')||'<p style="color:var(--text6);padding:12px;font-size:13px">No meetings yet</p>';
         }catch(e){}
     }
+
+    function toggleMeetingMenu(id){
+        const menu=document.getElementById('meeting-menu-'+id);
+        // Close all other menus first
+        document.querySelectorAll('[id^="meeting-menu-"]').forEach(m=>{if(m!==menu)m.style.display='none'});
+        menu.style.display=menu.style.display==='none'?'block':'none';
+    }
+
+    async function deleteMeeting(id){
+        if(!confirm('Delete this meeting?'))return;
+        await authFetch('/api/meetings/'+id,{method:'DELETE'});
+        loadMeetings();
+    }
+
+    // Close meeting menus when clicking elsewhere
+    document.addEventListener('click',()=>{document.querySelectorAll('[id^="meeting-menu-"]').forEach(m=>m.style.display='none')});
 
     async function searchMeetings(query){
         if(!query.trim()){loadMeetings();return}
