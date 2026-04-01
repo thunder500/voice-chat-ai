@@ -56,8 +56,22 @@ CREATE TABLE IF NOT EXISTS personas (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS meetings (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT DEFAULT 'Untitled Meeting',
+    summary TEXT,
+    action_items JSONB DEFAULT '[]',
+    transcript TEXT,
+    duration_seconds INTEGER,
+    model_used VARCHAR(100),
+    in_knowledge_base BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user ON knowledge_base(user_id);
 CREATE INDEX IF NOT EXISTS idx_personas_user ON personas(user_id);
 CREATE INDEX IF NOT EXISTS idx_apikeys_user ON user_api_keys(user_id);
+CREATE INDEX IF NOT EXISTS idx_meetings_user ON meetings(user_id);
