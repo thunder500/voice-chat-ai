@@ -823,7 +823,7 @@
         document.getElementById('meetingSummaryContent').innerHTML=
             '<h4 style="color:#8b5cf6;margin-bottom:8px">'+m.title+'</h4>'+
             '<ul style="margin:0 0 12px 16px">'+m.summary.map(s=>'<li>'+s+'</li>').join('')+'</ul>'+
-            (m.action_items.length?'<h4 style="margin-bottom:6px">Action Items</h4><ul style="margin:0 0 0 16px">'+m.action_items.map(a=>'<li>'+a+'</li>').join('')+'</ul>':'');
+            (m.action_items.length?'<h4 style="margin-bottom:6px">Action Items</h4><ul style="margin:0 0 0 16px">'+m.action_items.map(a=>'<li>'+(typeof a==='string'?a:JSON.stringify(a))+'</li>').join('')+'</ul>':'');
         document.getElementById('meetingSaveBtn').style.display='block';
     }
 
@@ -1661,7 +1661,7 @@
                 '<h2 style="color:#8b5cf6;margin-bottom:4px">'+m.title+'</h2>'+
                 '<p style="color:var(--text5);font-size:12px;margin-bottom:16px">'+new Date(m.created_at).toLocaleString()+' · '+Math.floor((m.duration_seconds||0)/60)+' min · '+(m.model_used||'N/A')+'</p>'+
                 (m.summary?'<h3 style="margin-bottom:8px">Summary</h3><div style="margin-bottom:16px;line-height:1.6">'+m.summary+'</div>':'')+
-                ((m.action_items||[]).length?'<h3 style="margin-bottom:8px">Action Items</h3><ul style="margin-bottom:16px">'+m.action_items.map(a=>'<li>'+a+'</li>').join('')+'</ul>':'')+
+                ((m.action_items||[]).length?'<h3 style="margin-bottom:8px">Action Items</h3><ul style="margin-bottom:16px">'+m.action_items.map(a=>'<li>'+(typeof a==='string'?a:JSON.stringify(a))+'</li>').join('')+'</ul>':'')+
                 '<h3 style="margin-bottom:8px">Transcript</h3>'+
                 '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;line-height:1.6;max-height:400px;overflow-y:auto;white-space:pre-wrap">'+(m.transcript||'No transcript')+'</div>'+
                 '</div>';
