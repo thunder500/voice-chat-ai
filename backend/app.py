@@ -1329,25 +1329,21 @@ async def meeting_ws_endpoint(ws: WebSocket):
         while True:
             message = await ws.receive()
 
-            # Binary data = audio chunk
+            # Binary data = audio chunk — just store, don't transcribe yet
             if "bytes" in message:
                 data = message["bytes"]
                 if data and meeting_active and len(data) > 500:
-                    logger.info(f"Meeting ext: received {len(data)} bytes (chunk #{len(meeting_audio_chunks)+1})")
                     meeting_audio_chunks.append(data)
-
-                    # Quick local transcription for live preview (not saved)
-                    text = await asyncio.to_thread(transcribe_audio_sync, data, True)
-                    if text:
-                        meeting_transcript_chunks.append(text)
-                        try:
-                            await ws.send_json({
-                                "type": "meeting_transcript",
-                                "text": text,
-                                "chunk_index": len(meeting_transcript_chunks) - 1,
-                            })
-                        except Exception:
-                            pass
+                    total_mb = sum(len(c) for c in meeting_audio_chunks) / 1048576
+                    # Send progress update (no transcription — wait for full audio)
+                    try:
+                        await ws.send_json({
+                            "type": "meeting_progress",
+                            "chunks": len(meeting_audio_chunks),
+                            "size_mb": round(total_mb, 1),
+                        })
+                    except Exception:
+                        pass
                 continue
 
             if "text" not in message:
@@ -1368,7 +1364,11 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
             elif msg.get("type") == "meeting_stop":
                 meeting_active = False
-                logger.info(f"Meeting extension: stopped. {len(meeting_audio_chunks)} audio chunks")
+                logger.info(f"Meeting extension: stop requested. {len(meeting_audio_chunks)} audio chunks")
+                try:
+                    await ws.send_json({"type": "meeting_processing", "message": "Transcribing with AI... this may take a minute."})
+                except Exception:
+                    pass
                 mid = await save_meeting_from_audio()
                 try:
                     await ws.send_json({"type": "meeting_stopped", "id": mid})
@@ -1397,16 +1397,16 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("Meeting extension disconnected")
-        # Save meeting on unexpected disconnect too
-        if meeting_active and meeting_audio_chunks:
+        if meeting_audio_chunks and len(meeting_audio_chunks) > 2:
             meeting_active = False
+            logger.info(f"Saving meeting from {len(meeting_audio_chunks)} chunks on disconnect...")
             try:
                 await save_meeting_from_audio()
             except Exception as e:
                 logger.error(f"Failed to save on disconnect: {e}")
     except Exception as e:
         logger.error(f"Meeting WS error: {e}")
-        if meeting_active and meeting_audio_chunks:
+        if meeting_audio_chunks and len(meeting_audio_chunks) > 2:
             meeting_active = False
             try:
                 await save_meeting_from_audio()

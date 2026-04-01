@@ -123,9 +123,14 @@ async function startRecording() {
   ws.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
-      if (data.type === 'meeting_transcript') {
-        showTranscript(data.text);
-        showStatus('Transcript #' + (data.chunk_index + 1));
+      if (data.type === 'meeting_progress') {
+        showStatus('Recording... ' + data.chunks + ' chunks (' + data.size_mb + ' MB)');
+      } else if (data.type === 'meeting_processing') {
+        showStatus('Processing: ' + data.message);
+        updateButton(false);
+      } else if (data.type === 'meeting_stopped') {
+        showStatus('Meeting saved! Check Voice Chat AI.', false);
+        setTimeout(() => hideStatus(), 5000);
       } else if (data.type === 'meeting_error') {
         showStatus('Error: ' + data.message, true);
       }
