@@ -811,19 +811,28 @@ HALLUCINATION_FILTER = {
 }
 
 
-def transcribe_audio_sync(audio_bytes: bytes) -> str:
+def transcribe_audio_sync(audio_bytes: bytes, meeting_mode: bool = False) -> str:
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
         tmp.write(audio_bytes)
         tmp_path = tmp.name
     try:
-        segments, info = whisper_model.transcribe(
-            tmp_path, beam_size=1, best_of=1, temperature=0,
-            language="en", condition_on_previous_text=False,
-            no_speech_threshold=0.5, log_prob_threshold=-0.8,
-        )
+        # Meeting mode: more lenient thresholds for lower quality tab audio
+        if meeting_mode:
+            segments, info = whisper_model.transcribe(
+                tmp_path, beam_size=3, best_of=2, temperature=0,
+                language="en", condition_on_previous_text=False,
+                no_speech_threshold=0.8, log_prob_threshold=-1.5,
+            )
+        else:
+            segments, info = whisper_model.transcribe(
+                tmp_path, beam_size=1, best_of=1, temperature=0,
+                language="en", condition_on_previous_text=False,
+                no_speech_threshold=0.5, log_prob_threshold=-0.8,
+            )
         text = " ".join(s.text for s in segments).strip()
         if text.lower().strip(".!?, ") in HALLUCINATION_FILTER or len(text) < 3:
             return ""
+        logger.info(f"Transcribed: {text[:100]}")
         return text
     finally:
         os.unlink(tmp_path)
@@ -1225,7 +1234,7 @@ async def websocket_endpoint(ws: WebSocket):
                 logger.info(f"Received {len(data)} bytes of audio (WebRTC fallback)")
 
                 if data and meeting_active:
-                    chunk_text_result = await asyncio.to_thread(transcribe_audio_sync, data)
+                    chunk_text_result = await asyncio.to_thread(transcribe_audio_sync, data, True)
                     if chunk_text_result:
                         meeting_transcript_chunks.append(chunk_text_result)
                         await ws.send_json({
@@ -1368,6 +1377,10 @@ async def websocket_endpoint(ws: WebSocket):
                     summary_model = msg.get("model", current_model)
                     full_transcript = "\n".join(meeting_transcript_chunks)
                     duration = int(asyncio.get_event_loop().time() - meeting_start_time)
+                    if not full_transcript.strip():
+                        await ws.send_json({"type": "meeting_error", "message": "No transcript to summarize. Make sure audio was captured."})
+                        continue
+                    logger.info(f"Summarizing {len(full_transcript)} chars with {summary_model}")
                     try:
                         result = await summarize_meeting(full_transcript, summary_model, user_keys)
                         mid = await create_meeting(user_id, result["title"], full_transcript, duration)
