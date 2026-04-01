@@ -808,7 +808,12 @@ HALLUCINATION_FILTER = {
     "", "you", "thank you", "thanks", "bye", "the end", "thanks for watching",
     "thank you for watching", "subscribe", "like and subscribe",
     "music", "applause", "laughter", "silence", "...",
+    "i'm sorry", "i'm sorry.", "sorry",
 }
+
+# Patterns that indicate Whisper hallucination (repeated phrases)
+import re
+HALLUCINATION_REPEAT_PATTERN = re.compile(r'(.{5,}?)\1{3,}', re.IGNORECASE)
 
 
 def transcribe_audio_sync(audio_bytes: bytes, meeting_mode: bool = False) -> str:
@@ -830,7 +835,13 @@ def transcribe_audio_sync(audio_bytes: bytes, meeting_mode: bool = False) -> str
                 no_speech_threshold=0.5, log_prob_threshold=-0.8,
             )
         text = " ".join(s.text for s in segments).strip()
-        if text.lower().strip(".!?, ") in HALLUCINATION_FILTER or len(text) < 3:
+        text_lower = text.lower().strip(".!?, ")
+        if text_lower in HALLUCINATION_FILTER or len(text) < 3:
+            logger.info(f"Filtered hallucination: {text[:50]}")
+            return ""
+        # Filter repetitive hallucinations like "I'm sorry, I'm sorry, I'm sorry..."
+        if HALLUCINATION_REPEAT_PATTERN.search(text):
+            logger.info(f"Filtered repeated hallucination: {text[:50]}")
             return ""
         logger.info(f"Transcribed: {text[:100]}")
         return text
