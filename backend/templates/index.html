@@ -625,34 +625,28 @@
 
     async function startMeetingRecording(){
         try{
-            const displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+            // Step 1: Get tab audio (the meeting)
+            const displayStream=await navigator.mediaDevices.getDisplayMedia({
+                video:true,
+                audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}
+            });
             if(displayStream.getAudioTracks().length===0){
                 displayStream.getTracks().forEach(t=>t.stop());
-                alert('No audio detected! Make sure to check "Share tab audio" in the share dialog.');
+                alert('No audio detected! When sharing, check the "Share tab audio" checkbox at the bottom.');
                 return;
             }
-            const micStream=await navigator.mediaDevices.getUserMedia({audio:true});
 
-            // Mix tab audio + mic into one stream using AudioContext
-            // Use specific sample rate for consistency
-            const audioCtx=new AudioContext({sampleRate:16000});
-            const dest=audioCtx.createMediaStreamDestination();
+            // Step 2: Get mic audio (your voice)
+            const micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
 
-            // Tab audio — boost volume (tab capture is often quiet)
-            const tabSource=audioCtx.createMediaStreamSource(displayStream);
-            const tabGain=audioCtx.createGain();
-            tabGain.gain.value=2.0; // Boost tab audio
-            tabSource.connect(tabGain);
-            tabGain.connect(dest);
+            // Step 3: Combine into one stream WITHOUT AudioContext
+            // AudioContext routing loses audio in some Chrome versions
+            // Instead, use a simple MediaStream with both audio tracks
+            const combinedStream=new MediaStream();
+            displayStream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
+            micStream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
 
-            // Mic audio
-            const micSource=audioCtx.createMediaStreamSource(micStream);
-            const micGain=audioCtx.createGain();
-            micGain.gain.value=1.5;
-            micSource.connect(micGain);
-            micGain.connect(dest);
-
-            meetingStream={display:displayStream,mic:micStream,ctx:audioCtx,destStream:dest.stream};
+            meetingStream={display:displayStream,mic:micStream,combinedStream:combinedStream};
             meetingRecordingActive=true;
             meetingStopCount=0;
             ws.send(JSON.stringify({type:'meeting_start'}));
@@ -666,17 +660,18 @@
             meetingSeconds=0;meetingPaused=false;
             meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
             displayStream.getVideoTracks()[0].onended=()=>stopMeeting();
-            console.log('Meeting recording started. Tab audio tracks:',displayStream.getAudioTracks().length,'Mic tracks:',micStream.getAudioTracks().length);
+            console.log('Meeting started. Tab audio tracks:',displayStream.getAudioTracks().length,
+                'settings:',JSON.stringify(displayStream.getAudioTracks()[0].getSettings()),
+                'Mic tracks:',micStream.getAudioTracks().length);
         }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Share a browser tab with audio enabled.')}
     }
 
     function _meetingRecordChunk(){
         if(!meetingRecordingActive||!meetingStream)return;
         if(meetingPaused){setTimeout(_meetingRecordChunk,500);return}
-        // Use audio/webm — let browser choose best codec
         let mimeType='audio/webm;codecs=opus';
         if(!MediaRecorder.isTypeSupported(mimeType))mimeType='audio/webm';
-        const rec=new MediaRecorder(meetingStream.destStream,{mimeType:mimeType,audioBitsPerSecond:64000});
+        const rec=new MediaRecorder(meetingStream.combinedStream,{mimeType:mimeType,audioBitsPerSecond:128000});
         const parts=[];
         rec.ondataavailable=(e)=>{if(e.data.size>0)parts.push(e.data)};
         rec.onstop=()=>{
@@ -707,7 +702,6 @@
         if(meetingStream){
             meetingStream.display.getTracks().forEach(t=>t.stop());
             meetingStream.mic.getTracks().forEach(t=>t.stop());
-            try{meetingStream.ctx.close()}catch(e){}
             meetingStream=null;
         }
         clearInterval(meetingInterval);
