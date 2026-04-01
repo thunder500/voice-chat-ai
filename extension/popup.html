@@ -1,55 +1,45 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta http-equiv="Content-Security-Policy" content="script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://localhost:8000 wss://localhost:8000 http://localhost:8000 https://localhost:8000 ws://* wss://*;">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { width:320px; font-family:-apple-system,sans-serif; background:#0a0a0f; color:#e0e0e0; padding:20px; }
     h2 { color:#8b5cf6; font-size:16px; margin-bottom:4px; }
     .sub { color:#888; font-size:11px; margin-bottom:16px; }
-    .status { display:flex; align-items:center; gap:8px; margin-bottom:16px; padding:10px; background:#1a1a2e; border-radius:8px; font-size:13px; }
-    .dot { width:10px; height:10px; border-radius:50%; }
-    .dot.off { background:#666; }
-    .dot.rec { background:#ef4444; animation:pulse 1s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
     label { font-size:12px; color:#aaa; display:block; margin-bottom:4px; }
     input { width:100%; background:#111; border:1px solid #2a2a3e; color:#e0e0e0; padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:12px; outline:none; }
     input:focus { border-color:#8b5cf6; }
-    button { width:100%; padding:10px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
-    .btn-start { background:#8b5cf6; color:white; }
-    .btn-start:hover { background:#7c3aed; }
-    .btn-stop { background:#ef4444; color:white; }
-    .btn-stop:hover { background:#dc2626; }
-    .btn-start:disabled { background:#333; color:#666; cursor:not-allowed; }
-    .btn-popout { width:100%; padding:6px; margin-top:8px; background:transparent; border:1px solid #2a2a3e; color:#888; border-radius:6px; font-size:11px; cursor:pointer; }
-    .info { font-size:11px; color:#666; margin-top:12px; text-align:center; }
-    .msg { font-size:12px; margin-top:8px; min-height:20px; }
-    .msg.error { color:#ef4444; }
-    .msg.ok { color:#8b5cf6; }
+    button { width:100%; padding:10px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; background:#8b5cf6; color:white; }
+    button:hover { background:#7c3aed; }
+    .saved { color:#4ade80; font-size:12px; margin-top:8px; display:none; }
+    .info { font-size:11px; color:#666; margin-top:16px; text-align:center; line-height:1.5; }
+    .steps { font-size:12px; color:#aaa; margin-top:12px; line-height:1.8; }
+    .steps b { color:#8b5cf6; }
   </style>
 </head>
 <body>
   <h2>Voice Chat AI</h2>
-  <p class="sub">Meeting Recorder</p>
+  <p class="sub">Meeting Recorder Setup</p>
 
-  <div class="status">
-    <span class="dot" id="statusDot"></span>
-    <span id="statusText">Not recording</span>
+  <label>Server URL</label>
+  <input type="text" id="serverUrl" value="http://localhost:8000">
+
+  <label>Auth Token (from Settings > API Keys)</label>
+  <input type="text" id="authToken" placeholder="Paste your token here">
+
+  <button id="saveBtn">Save Settings</button>
+  <div class="saved" id="savedMsg">Settings saved! Refresh your Meet tab.</div>
+
+  <div class="steps">
+    <b>How to use:</b><br>
+    1. Paste your token above and click Save<br>
+    2. Go to your Google Meet tab<br>
+    3. You'll see a purple <b>"Record Meeting"</b> button (bottom-left)<br>
+    4. Click it to start/stop recording<br>
+    5. No need to keep this popup open!
   </div>
 
-  <div id="configSection">
-    <label>Server URL</label>
-    <input type="text" id="serverUrl" value="http://localhost:8000">
-    <label>Auth Token</label>
-    <input type="text" id="authToken" placeholder="Paste token from Settings > API Keys">
-  </div>
-
-  <button id="startBtn" class="btn-start">Start Recording</button>
-  <button id="stopBtn" class="btn-stop" style="display:none">Stop Recording</button>
-
-  <div id="msgArea" class="msg"></div>
-  <button id="popoutBtn" class="btn-popout">Pop out to window</button>
-  <p class="info">Google Meet must be the active tab when you click Start</p>
+  <p class="info">The record button appears directly on the Meet page.<br>You can close this popup after saving.</p>
 
   <script src="popup.js"></script>
 </body>
