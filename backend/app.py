@@ -1339,7 +1339,14 @@ async def meeting_ws_endpoint(ws: WebSocket):
                 full_transcript = "\n".join(meeting_transcript_chunks)
                 duration = int(asyncio.get_event_loop().time() - meeting_start_time)
                 logger.info(f"Meeting extension: stopped. {duration}s, {len(meeting_transcript_chunks)} chunks")
-                await ws.send_json({"type": "meeting_stopped", "transcript": full_transcript, "duration": duration})
+
+                # Auto-save the meeting to database
+                if full_transcript.strip():
+                    mid = await create_meeting(user_id, "Meeting Recording", full_transcript, duration)
+                    logger.info(f"Meeting saved: id={mid}")
+                    await ws.send_json({"type": "meeting_stopped", "id": mid, "transcript": full_transcript, "duration": duration})
+                else:
+                    await ws.send_json({"type": "meeting_stopped", "transcript": "", "duration": duration})
 
             elif msg.get("type") == "meeting_summarize":
                 summary_model = msg.get("model", "gpt-4o-mini")
