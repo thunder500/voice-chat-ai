@@ -59,49 +59,44 @@ async function startRecording() {
     return;
   }
 
-  // Try to refresh token
-  try {
-    const refreshResp = await fetch(serverUrl + '/api/auth/refresh', { method: 'POST', credentials: 'include' });
-    if (refreshResp.ok) {
-      const refreshData = await refreshResp.json();
-      token = refreshData.access_token;
-      chrome.storage.local.set({ authToken: token });
-    }
-  } catch(e) {}
-
-  showStatus('Capturing tab audio...');
+  showStatus('Capturing audio...');
   updateButton(true);
 
-  // Use tabCapture — works from content script user gesture in ISOLATED world
+  // Get mic audio directly (content script can do getUserMedia)
   try {
-    stream = await new Promise((resolve, reject) => {
-      chrome.tabCapture.capture({ audio: true, video: false }, (s) => {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log('[VoiceChatAI] Mic captured');
+  } catch(e) {
+    showStatus('Mic access denied: ' + e.message, true);
+    updateButton(false);
+    return;
+  }
+
+  // Also request tab capture via background script
+  try {
+    const tabStream = await new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type: 'do_tab_capture' }, (resp) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          console.log('[VoiceChatAI] Tab capture not available, mic only');
+          resolve(null);
           return;
         }
-        resolve(s);
+        if (resp && resp.streamId) {
+          // Got a stream ID from tabCapture.getMediaStreamId
+          navigator.mediaDevices.getUserMedia({
+            audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: resp.streamId } }
+          }).then(resolve).catch(() => resolve(null));
+        } else {
+          resolve(null);
+        }
       });
     });
+    if (tabStream) {
+      tabStream.getAudioTracks().forEach(t => stream.addTrack(t));
+      console.log('[VoiceChatAI] Tab audio added');
+    }
   } catch(e) {
-    showStatus('Tab capture failed: ' + e.message, true);
-    updateButton(false);
-    return;
-  }
-
-  if (!stream || stream.getAudioTracks().length === 0) {
-    showStatus('No audio captured. Try again.', true);
-    updateButton(false);
-    return;
-  }
-
-  // Also get mic
-  try {
-    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micStream.getAudioTracks().forEach(t => stream.addTrack(t));
-    console.log('[VoiceChatAI] Mic added');
-  } catch(e) {
-    console.log('[VoiceChatAI] No mic access:', e.message);
+    console.log('[VoiceChatAI] Tab capture skipped:', e.message);
   }
 
   showStatus('Connecting to server...');

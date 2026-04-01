@@ -1,101 +1,29 @@
-// Background service worker — coordinates popup, offscreen doc, and content script
-
-let isRecording = false;
-let recordingTabId = null;
-
-// Ensure offscreen document exists
-async function ensureOffscreen() {
-  const existing = await chrome.offscreen.hasDocument();
-  if (!existing) {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['USER_MEDIA'],
-      justification: 'Recording tab audio for meeting transcription'
-    });
-  }
-}
+// Background service worker
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'get_status') {
-    sendResponse({ recording: isRecording, tabId: recordingTabId });
-    return true;
-  }
+  if (msg.type === 'do_tab_capture') {
+    // Get the tab that sent this message
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (!tabId) {
+      sendResponse({ error: 'No tab' });
+      return true;
+    }
 
-  if (msg.type === 'start_capture') {
-    // Popup captured the tab, now hand off to offscreen document
-    handleStartCapture(msg).then(r => sendResponse(r));
-    return true;
-  }
+    // Use tabCapture.getMediaStreamId to get a stream ID the content script can use
+    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
+      if (chrome.runtime.lastError) {
+        console.log('Tab capture error:', chrome.runtime.lastError.message);
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      sendResponse({ streamId: streamId });
+    });
 
-  if (msg.type === 'stop_recording') {
-    handleStopRecording().then(() => sendResponse({ ok: true }));
-    return true;
+    return true; // async response
   }
 
   if (msg.type === 'recording_status') {
-    isRecording = msg.recording;
-    // Update badge
-    chrome.action.setBadgeText({ text: isRecording ? 'REC' : '' });
+    chrome.action.setBadgeText({ text: msg.recording ? 'REC' : '' });
     chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-    return;
-  }
-
-  if (msg.type === 'recording_error') {
-    console.error('Recording error:', msg.message);
-    isRecording = false;
-    chrome.action.setBadgeText({ text: '' });
-    return;
-  }
-
-  if (msg.type === 'server_message') {
-    // Forward transcript to content script
-    if (msg.data && msg.data.type === 'meeting_transcript' && recordingTabId) {
-      chrome.tabs.sendMessage(recordingTabId, {
-        type: 'transcript',
-        text: msg.data.text
-      }).catch(() => {});
-    }
-    return;
   }
 });
-
-async function handleStartCapture(msg) {
-  try {
-    await ensureOffscreen();
-    recordingTabId = msg.tabId;
-
-    // Tell offscreen doc to start recording with the stream ID
-    chrome.runtime.sendMessage({
-      type: 'start_offscreen_recording',
-      streamId: msg.streamId,
-      wsUrl: msg.wsUrl,
-      token: msg.token,
-      tabId: msg.tabId,
-    });
-
-    isRecording = true;
-    chrome.action.setBadgeText({ text: 'REC' });
-    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-
-    // Tell content script
-    if (recordingTabId) {
-      chrome.tabs.sendMessage(recordingTabId, { type: 'recording_started' }).catch(() => {});
-    }
-
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-async function handleStopRecording() {
-  try {
-    chrome.runtime.sendMessage({ type: 'stop_offscreen_recording' });
-  } catch (e) {}
-  isRecording = false;
-  chrome.action.setBadgeText({ text: '' });
-  if (recordingTabId) {
-    chrome.tabs.sendMessage(recordingTabId, { type: 'recording_stopped' }).catch(() => {});
-    recordingTabId = null;
-  }
-}
