@@ -733,6 +733,86 @@ async def remove_persona(pid: int, request: Request):
 
 
 # ---- Meetings API ----
+@app.post("/api/meetings/upload")
+async def upload_meeting_audio(request: Request, audio: UploadFile = File(...), duration: str = Form("0")):
+    """Upload full meeting audio, transcribe with Whisper, return transcript."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    audio_bytes = await audio.read()
+    if len(audio_bytes) < 1000:
+        return JSONResponse(content={"error": "Audio file too small"}, status_code=400)
+
+    logger.info(f"Meeting upload: {len(audio_bytes)} bytes, {duration}s")
+
+    # Transcribe the full audio
+    text = await asyncio.to_thread(transcribe_audio_sync, audio_bytes, True)
+    if not text:
+        # Try without meeting mode
+        text = await asyncio.to_thread(transcribe_audio_sync, audio_bytes, False)
+    if not text:
+        text = "(No speech detected in audio)"
+
+    logger.info(f"Meeting transcript: {len(text)} chars")
+
+    # Save to database
+    dur = int(duration) if duration.isdigit() else 0
+    mid = await create_meeting(user_id, "Untitled Meeting", text, dur)
+
+    return JSONResponse(content={"id": mid, "transcript": text, "duration": dur})
+
+
+@app.post("/api/meetings/{mid}/summarize")
+async def summarize_meeting_endpoint(mid: int, request: Request, data: dict):
+    """Generate summary for an existing meeting."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    meeting = await get_meeting(mid, user_id)
+    if not meeting:
+        return JSONResponse(content={"error": "Meeting not found"}, status_code=404)
+
+    transcript = meeting.get("transcript", "")
+    if not transcript or transcript == "(No speech detected in audio)":
+        return JSONResponse(content={"error": "No transcript to summarize"}, status_code=400)
+
+    model = data.get("model", "gpt-4o-mini")
+
+    # Get user keys
+    user_keys = {}
+    for prov in ["openai", "anthropic", "groq", "google"]:
+        k = await get_decrypted_key(user_id, prov)
+        if k:
+            user_keys[prov] = k
+
+    try:
+        result = await summarize_meeting(transcript, model, user_keys)
+        await update_meeting_summary(mid, result["title"], "\n".join(result["summary"]),
+                                     result["action_items"], model)
+
+        # Vectorize
+        try:
+            from embeddings import chunk_text, embed_texts
+            from vectorstore import add_chunks
+            openai_key = user_keys.get("openai")
+            summary_text = f"{result['title']}\n\n{chr(10).join(result['summary'])}\n\nAction Items: {json.dumps(result['action_items'])}"
+            chunks = chunk_text(summary_text)
+            embeddings = await embed_texts(chunks, openai_key)
+            await add_chunks(user_id, mid, "meeting", result["title"], "", chunks, embeddings)
+        except Exception as e:
+            logger.warning(f"Vectorize failed: {e}")
+
+        return JSONResponse(content={
+            "id": mid, "title": result["title"],
+            "summary": result["summary"], "action_items": result["action_items"],
+        })
+    except Exception as e:
+        logger.error(f"Summary error: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
 @app.get("/api/meetings")
 async def list_meetings(request: Request):
     user_id = get_user_id_from_request(request)

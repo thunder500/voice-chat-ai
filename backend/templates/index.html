@@ -374,7 +374,7 @@
         <div class="header-right">
             <select class="model-select" id="voiceSelect" onchange="switchVoice(this.value)"></select>
             <select class="model-select" id="modelSelect" onchange="switchModel(this.value)"></select>
-            <button class="icon-btn" id="recordMeetingBtn" onclick="showMeetingJoinDialog()">Join Meeting</button>
+            <button class="icon-btn" id="recordMeetingBtn" onclick="startMeetingRecording()">Record Meeting</button>
             <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">&#9728;</button>
             <div id="userMenu" class="user-menu" style="display:none">
               <button class="user-avatar" onclick="toggleUserDropdown()">
@@ -653,87 +653,61 @@
         });
     }
 
-    // ---- Meeting Join Dialog ----
-    function showMeetingJoinDialog(){
-        document.getElementById('meetingJoinOverlay').style.display='flex';
-        document.getElementById('meetUrlInput').focus();
-        document.getElementById('meetJoinError').textContent='';
-    }
-    function closeMeetingJoinDialog(){
-        document.getElementById('meetingJoinOverlay').style.display='none';
-    }
-    function joinMeetingBot(){
-        const url=document.getElementById('meetUrlInput').value.trim();
-        if(!url||!url.includes('meet.google.com')){
-            document.getElementById('meetJoinError').textContent='Please enter a valid Google Meet link';
-            return;
-        }
-        closeMeetingJoinDialog();
-        // Show meeting modal
-        document.getElementById('meetingModal').style.display='flex';
-        document.getElementById('meetingSummaryScreen').style.display='none';
-        document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Bot is joining the meeting...</p>';
-        document.getElementById('recDot').style.animation='pulse-rec 1s infinite';
-        document.getElementById('recDot').style.background='#ef4444';
-        document.getElementById('recordMeetingBtn').style.display='none';
-        meetingSeconds=0;meetingPaused=false;meetingRecordingActive=true;meetingStopCount=0;
-        meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
-        // Tell backend to join via bot
-        ws.send(JSON.stringify({type:'meeting_join',url:url}));
-    }
-
-    // ---- Meeting Recorder (Tab Capture Fallback) ----
+    // ---- Meeting Recorder ----
+    // Records locally in browser, uploads full audio when stopped
     let meetingStream=null,meetingInterval=null,meetingSeconds=0,meetingPaused=false,meetingRecordingActive=false;
+    let meetingFullRecorder=null,meetingFullParts=[];
 
     async function startMeetingRecording(){
         try{
-            // Step 1: Get tab audio (the meeting)
+            // Share your Google Meet tab — MUST check "Share tab audio"
             const displayStream=await navigator.mediaDevices.getDisplayMedia({
                 video:true,
                 audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}
             });
             if(displayStream.getAudioTracks().length===0){
                 displayStream.getTracks().forEach(t=>t.stop());
-                alert('No audio detected! When sharing, check the "Share tab audio" checkbox at the bottom.');
+                alert('No audio! You MUST check "Share tab audio" at the bottom of the share dialog.');
                 return;
             }
 
-            // Step 2: Get mic audio (your voice)
-            const micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+            // Also get mic
+            let micStream=null;
+            try{ micStream=await navigator.mediaDevices.getUserMedia({audio:true}); }catch(e){}
 
-            // Step 3: Combine into one stream WITHOUT AudioContext
-            // AudioContext routing loses audio in some Chrome versions
-            // Instead, use a simple MediaStream with both audio tracks
+            // Combine streams
             const combinedStream=new MediaStream();
             displayStream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
-            micStream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
+            if(micStream) micStream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
 
-            meetingStream={display:displayStream,mic:micStream,combinedStream:combinedStream};
+            meetingStream={display:displayStream,mic:micStream};
             meetingRecordingActive=true;
-            meetingStopCount=0;
-            ws.send(JSON.stringify({type:'meeting_start'}));
-            _meetingRecordChunk();
+            meetingFullParts=[];
+
+            // Record entire meeting as one file (no chunking)
+            meetingFullRecorder=new MediaRecorder(combinedStream,{mimeType:'audio/webm;codecs=opus',audioBitsPerSecond:128000});
+            meetingFullRecorder.ondataavailable=(e)=>{if(e.data.size>0)meetingFullParts.push(e.data)};
+            meetingFullRecorder.start(1000); // collect data every 1s for size display
+
+            // Show UI
             document.getElementById('meetingModal').style.display='flex';
             document.getElementById('meetingSummaryScreen').style.display='none';
-            document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Listening...</p>';
+            document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Recording meeting audio locally...<br>Click Stop when the meeting ends to transcribe.</p>';
             document.getElementById('recDot').style.animation='pulse-rec 1s infinite';
             document.getElementById('recDot').style.background='#ef4444';
             document.getElementById('recordMeetingBtn').style.display='none';
             meetingSeconds=0;meetingPaused=false;
-            meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
+            meetingInterval=setInterval(()=>{
+                if(!meetingPaused){
+                    meetingSeconds++;
+                    const mm=String(Math.floor(meetingSeconds/60)).padStart(2,'0');
+                    const ss=String(meetingSeconds%60).padStart(2,'0');
+                    const sizeMB=(meetingFullParts.reduce((a,p)=>a+p.size,0)/1048576).toFixed(1);
+                    document.getElementById('meetingTimer').textContent=mm+':'+ss+' ('+sizeMB+'MB)';
+                }
+            },1000);
             displayStream.getVideoTracks()[0].onended=()=>stopMeeting();
-            console.log('Meeting started. Tab audio tracks:',displayStream.getAudioTracks().length,
-                'settings:',JSON.stringify(displayStream.getAudioTracks()[0].getSettings()),
-                'Mic tracks:',micStream.getAudioTracks().length);
-        }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Share a browser tab with audio enabled.')}
-    }
-
-    function _meetingRecordChunk(){
-        if(!meetingRecordingActive||!meetingStream)return;
-        if(meetingPaused){setTimeout(_meetingRecordChunk,500);return}
-        let mimeType='audio/webm;codecs=opus';
-        if(!MediaRecorder.isTypeSupported(mimeType))mimeType='audio/webm';
-        const rec=new MediaRecorder(meetingStream.combinedStream,{mimeType:mimeType,audioBitsPerSecond:128000});
+        }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Share a browser tab with audio.')}
         const parts=[];
         rec.ondataavailable=(e)=>{if(e.data.size>0)parts.push(e.data)};
         rec.onstop=()=>{
@@ -752,29 +726,64 @@
         meetingPaused=!meetingPaused;
         document.getElementById('meetingPauseBtn').textContent=meetingPaused?'Resume':'Pause';
         document.getElementById('recDot').classList.toggle('paused',meetingPaused);
-        if(!meetingPaused)_meetingRecordChunk();
+        if(!meetingPaused&&meetingFullRecorder&&meetingFullRecorder.state==='paused')meetingFullRecorder.resume();
     }
 
     let meetingStopCount=0;
     function stopMeeting(){
-        // Prevent multiple calls (tab share end + button click can fire together)
         if(!meetingRecordingActive&&meetingStopCount>0)return;
         meetingStopCount++;
         meetingRecordingActive=false;
+
+        // Stop recorder — this triggers final ondataavailable
+        if(meetingFullRecorder&&meetingFullRecorder.state!=='inactive'){
+            meetingFullRecorder.stop();
+        }
         if(meetingStream){
             meetingStream.display.getTracks().forEach(t=>t.stop());
-            meetingStream.mic.getTracks().forEach(t=>t.stop());
+            if(meetingStream.mic)meetingStream.mic.getTracks().forEach(t=>t.stop());
             meetingStream=null;
         }
         clearInterval(meetingInterval);
-        if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'meeting_stop'}));
+
         document.getElementById('recDot').style.animation='none';
         document.getElementById('recDot').style.background='var(--text6)';
-        document.getElementById('meetingSummaryScreen').style.display='block';
         document.getElementById('recordMeetingBtn').style.display='';
-        const sel=document.getElementById('meetingSummaryModel');
-        const mainSel=document.getElementById('modelSelect');
-        sel.innerHTML=mainSel.innerHTML;sel.value=mainSel.value;
+
+        // Show uploading status
+        const transcript=document.getElementById('meetingTranscript');
+        const sizeMB=(meetingFullParts.reduce((a,p)=>a+p.size,0)/1048576).toFixed(1);
+        transcript.innerHTML='<p style="color:#8b5cf6;font-weight:600">Uploading '+sizeMB+'MB of audio for transcription...</p><p class="meeting-placeholder">This may take a minute for longer meetings.</p>';
+
+        // Upload the full recording
+        const blob=new Blob(meetingFullParts,{type:'audio/webm'});
+        const formData=new FormData();
+        formData.append('audio',blob,'meeting.webm');
+        formData.append('duration',String(meetingSeconds));
+
+        authFetch('/api/meetings/upload',{method:'POST',body:formData}).then(r=>r.json()).then(data=>{
+            if(data.error){
+                transcript.innerHTML='<p style="color:#ef4444">Error: '+data.error+'</p>';
+                return;
+            }
+            // Show transcript
+            transcript.innerHTML='<p style="color:#4ade80;font-weight:600">Transcription complete!</p>';
+            if(data.transcript){
+                const p=document.createElement('p');
+                p.style.cssText='white-space:pre-wrap;font-size:13px;line-height:1.5;margin-top:8px;max-height:200px;overflow-y:auto';
+                p.textContent=data.transcript;
+                transcript.appendChild(p);
+            }
+            // Show summary screen
+            document.getElementById('meetingSummaryScreen').style.display='block';
+            const sel=document.getElementById('meetingSummaryModel');
+            const mainSel=document.getElementById('modelSelect');
+            sel.innerHTML=mainSel.innerHTML;sel.value=mainSel.value;
+            // Store meeting ID for summary
+            document.getElementById('meetingSummaryScreen').dataset.meetingId=data.id;
+        }).catch(e=>{
+            transcript.innerHTML='<p style="color:#ef4444">Upload failed: '+e.message+'</p>';
+        });
     }
 
     function minimizeMeeting(){document.getElementById('meetingModal').classList.toggle('minimized')}
@@ -782,8 +791,22 @@
     function generateMeetingSummary(){
         const model=document.getElementById('meetingSummaryModel').value;
         if(!model){alert('Select a model first');return}
+        const meetingId=document.getElementById('meetingSummaryScreen').dataset.meetingId;
+        if(!meetingId){alert('No meeting to summarize');return}
         document.getElementById('meetingSummaryContent').innerHTML='<p style="color:var(--text5)">Generating summary...</p>';
-        ws.send(JSON.stringify({type:'meeting_summarize',model:model}));
+        authFetch('/api/meetings/'+meetingId+'/summarize',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({model:model})
+        }).then(r=>r.json()).then(data=>{
+            if(data.error){
+                document.getElementById('meetingSummaryContent').innerHTML='<p style="color:#ef4444">'+data.error+'</p>';
+                return;
+            }
+            handleMeetingSummary(data);
+        }).catch(e=>{
+            document.getElementById('meetingSummaryContent').innerHTML='<p style="color:#ef4444">'+e.message+'</p>';
+        });
     }
 
     function saveMeeting(){document.getElementById('meetingModal').style.display='none';loadMeetings()}
