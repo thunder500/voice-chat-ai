@@ -50,25 +50,26 @@ async def transcribe_meeting(audio_bytes: bytes, user_keys: dict, whisper_model=
 async def _transcribe_deepgram(audio_bytes: bytes, api_key: str) -> str | None:
     """Transcribe with Deepgram — includes speaker diarization."""
     try:
-        from deepgram import DeepgramClient, PrerecordedOptions
-
-        client = DeepgramClient(api_key)
-        payload = {"buffer": audio_bytes}
-        options = PrerecordedOptions(
-            model="nova-2",
-            smart_format=True,
-            diarize=True,
-            punctuate=True,
-            utterances=True,
-            language="en",
-        )
-
-        response = await asyncio.to_thread(
-            client.listen.rest.v("1").transcribe_file, payload, options
-        )
-
-        # Format with speaker labels
-        result = response.to_dict()
+        # Use Deepgram REST API directly (more reliable than SDK version changes)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                "https://api.deepgram.com/v1/listen",
+                params={
+                    "model": "nova-2",
+                    "smart_format": "true",
+                    "diarize": "true",
+                    "punctuate": "true",
+                    "utterances": "true",
+                    "language": "en",
+                },
+                headers={
+                    "Authorization": f"Token {api_key}",
+                    "Content-Type": "audio/webm",
+                },
+                content=audio_bytes,
+            )
+            resp.raise_for_status()
+            result = resp.json()
         utterances = result.get("results", {}).get("utterances", [])
 
         if utterances:
