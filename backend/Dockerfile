@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pre-download whisper base model
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
 
+
 # Copy app code
 COPY . .
 

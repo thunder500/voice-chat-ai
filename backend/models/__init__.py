@@ -16,3 +16,7 @@ from models.knowledge import (
 from models.personas import (
     get_personas, get_persona, add_persona, delete_persona,
 )
+from models.meetings import (
+    create_meeting, update_meeting_summary, get_meeting,
+    get_meetings, delete_meeting, update_meeting_kb_toggle,
+)

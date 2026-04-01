@@ -45,6 +45,34 @@
         .copy-btn{background:none;border:1px solid var(--code-border);color:var(--code-meta);padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;transition:all .2s}
         .copy-btn:hover{border-color:#8b5cf6;color:#8b5cf6}
 
+        /* Meeting Recorder */
+        .meeting-modal{position:fixed;bottom:20px;right:20px;width:400px;max-height:500px;background:var(--surface);border:1px solid var(--border);border-radius:12px;z-index:90;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow:hidden}
+        .meeting-modal.minimized{max-height:44px;overflow:hidden}
+        .meeting-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg-elev)}
+        .meeting-status{display:flex;align-items:center;gap:8px}
+        .rec-dot{width:10px;height:10px;border-radius:50%;background:#ef4444;animation:pulse-rec 1s infinite}
+        @keyframes pulse-rec{0%,100%{opacity:1}50%{opacity:.3}}
+        .rec-dot.paused{background:#f59e0b;animation:none}
+        #meetingTimer{font-family:monospace;font-size:14px;color:var(--text2)}
+        .meeting-actions{display:flex;gap:6px}
+        .meeting-btn{background:var(--surface);border:1px solid var(--border);color:var(--text3);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+        .meeting-btn:hover{border-color:#8b5cf6;color:#8b5cf6}
+        .meeting-btn.stop{border-color:#ef4444;color:#ef4444}
+        .meeting-btn.stop:hover{background:#ef4444;color:#fff}
+        .meeting-btn.save{background:#8b5cf6;color:#fff;border:none;padding:8px 16px;width:100%;margin-top:8px;border-radius:8px;cursor:pointer}
+        .meeting-transcript{flex:1;overflow-y:auto;padding:12px;max-height:250px;font-size:13px;line-height:1.5;color:var(--text2)}
+        .meeting-placeholder{color:var(--text6);font-style:italic}
+        .meeting-model-select{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+        .meeting-model-select label{font-size:12px;color:var(--text4)}
+        .meeting-model-select select{background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px}
+        .meeting-model-select button{background:#8b5cf6;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px}
+        #meetingSummaryContent{padding:8px 0;font-size:13px;line-height:1.5;max-height:200px;overflow-y:auto}
+        #meetingSummaryScreen{padding:12px}
+        .meeting-kb-toggle{padding:4px 0;font-size:13px;color:var(--text3)}
+        .sidebar-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:8px}
+        .sidebar-tab{flex:1;padding:8px;background:none;border:none;color:var(--text5);cursor:pointer;font-size:12px;border-bottom:2px solid transparent}
+        .sidebar-tab.active{color:#8b5cf6;border-bottom-color:#8b5cf6}
+
         /* Mute Button */
         .mute-btn{background:#ef4444;color:#fff;border:none;padding:8px 20px;border-radius:20px;cursor:pointer;font-size:14px;font-weight:600;transition:all .2s;display:none}
         .mute-btn:hover{background:#dc2626;transform:scale(1.05)}
@@ -313,9 +341,21 @@
     <!-- Sidebar -->
     <div class="sidebar-bg" id="sidebarBg" onclick="toggleSidebar()"></div>
     <div class="sidebar" id="sidebar">
-        <div class="sidebar-hdr"><h3>Conversations</h3><button class="small-btn" onclick="newConversation()">+ New</button></div>
-        <div class="sidebar-search"><input type="text" id="convSearch" placeholder="Search conversations..." oninput="onConvSearch(this.value)"></div>
-        <div class="conv-list" id="convList"></div>
+        <div class="sidebar-hdr"><h3>History</h3><button class="small-btn" onclick="newConversation()">+ New</button></div>
+        <div style="padding:8px 10px 0">
+          <div class="sidebar-tabs">
+            <button class="sidebar-tab active" onclick="switchSidebarTab('conversations',this)">Conversations</button>
+            <button class="sidebar-tab" onclick="switchSidebarTab('meetings',this)">Meetings</button>
+          </div>
+        </div>
+        <div id="conversationsTab">
+          <div class="sidebar-search"><input type="text" id="convSearch" placeholder="Search conversations..." oninput="onConvSearch(this.value)"></div>
+          <div class="conv-list" id="convList"></div>
+        </div>
+        <div id="meetingsTab" style="display:none;padding:8px 10px">
+          <input type="text" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;font-size:12px;margin-bottom:8px" placeholder="Search meetings..." oninput="searchMeetings(this.value)">
+          <div id="meetingsList"></div>
+        </div>
     </div>
 
     <!-- Header -->
@@ -328,6 +368,7 @@
         <div class="header-right">
             <select class="model-select" id="voiceSelect" onchange="switchVoice(this.value)"></select>
             <select class="model-select" id="modelSelect" onchange="switchModel(this.value)"></select>
+            <button class="icon-btn" id="recordMeetingBtn" onclick="startMeetingRecording()">Record Meeting</button>
             <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">&#9728;</button>
             <div id="userMenu" class="user-menu" style="display:none">
               <button class="user-avatar" onclick="toggleUserDropdown()">
@@ -377,6 +418,30 @@
                 <div id="adminUserList"></div>
             </div>
         </div>
+    </div>
+
+    <!-- Meeting Recorder Modal -->
+    <div id="meetingModal" class="meeting-modal" style="display:none">
+      <div class="meeting-header">
+        <div class="meeting-status"><span class="rec-dot" id="recDot"></span><span id="meetingTimer">00:00</span></div>
+        <div class="meeting-actions">
+          <button class="meeting-btn" id="meetingPauseBtn" onclick="pauseMeeting()">Pause</button>
+          <button class="meeting-btn stop" onclick="stopMeeting()">Stop</button>
+          <button class="meeting-btn" onclick="minimizeMeeting()">_</button>
+        </div>
+      </div>
+      <div class="meeting-transcript" id="meetingTranscript"><p class="meeting-placeholder">Waiting for audio...</p></div>
+      <div id="meetingSummaryScreen" style="display:none">
+        <h3 style="color:#8b5cf6;margin-bottom:12px">Generate Summary</h3>
+        <div class="meeting-model-select">
+          <label>Model:</label>
+          <select id="meetingSummaryModel"></select>
+          <button onclick="generateMeetingSummary()">Generate</button>
+        </div>
+        <div id="meetingSummaryContent"></div>
+        <div class="meeting-kb-toggle"><label><input type="checkbox" id="meetingKBToggle" checked> Save to Knowledge Base</label></div>
+        <button class="meeting-btn save" id="meetingSaveBtn" style="display:none" onclick="saveMeeting()">Save Meeting</button>
+      </div>
     </div>
 
     <!-- Controls -->
@@ -555,6 +620,83 @@
         loadApiKeys();
     }
 
+    // ---- Meeting Recorder ----
+    let meetingStream=null,meetingRecorder=null,meetingInterval=null,meetingSeconds=0,meetingPaused=false;
+
+    async function startMeetingRecording(){
+        try{
+            const displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+            const micStream=await navigator.mediaDevices.getUserMedia({audio:true});
+            const audioCtx=new AudioContext();
+            const dest=audioCtx.createMediaStreamDestination();
+            audioCtx.createMediaStreamSource(displayStream).connect(dest);
+            audioCtx.createMediaStreamSource(micStream).connect(dest);
+            meetingStream={display:displayStream,mic:micStream,ctx:audioCtx};
+            meetingRecorder=new MediaRecorder(dest.stream,{mimeType:'audio/webm;codecs=opus'});
+            meetingRecorder.ondataavailable=(e)=>{if(e.data.size>0&&ws&&ws.readyState===1)e.data.arrayBuffer().then(buf=>ws.send(buf))};
+            meetingRecorder.start(10000);
+            ws.send(JSON.stringify({type:'meeting_start'}));
+            document.getElementById('meetingModal').style.display='flex';
+            document.getElementById('meetingSummaryScreen').style.display='none';
+            document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Listening...</p>';
+            document.getElementById('recDot').style.animation='pulse-rec 1s infinite';
+            document.getElementById('recDot').style.background='#ef4444';
+            meetingSeconds=0;meetingPaused=false;
+            meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;const m=String(Math.floor(meetingSeconds/60)).padStart(2,'0');const s=String(meetingSeconds%60).padStart(2,'0');document.getElementById('meetingTimer').textContent=m+':'+s}},1000);
+            displayStream.getVideoTracks()[0].onended=()=>stopMeeting();
+        }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Make sure to share a browser tab with audio.')}
+    }
+
+    function pauseMeeting(){
+        meetingPaused=!meetingPaused;
+        document.getElementById('meetingPauseBtn').textContent=meetingPaused?'Resume':'Pause';
+        document.getElementById('recDot').classList.toggle('paused',meetingPaused);
+        if(meetingPaused)meetingRecorder.pause();else meetingRecorder.resume();
+    }
+
+    function stopMeeting(){
+        if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop();
+        if(meetingStream){meetingStream.display.getTracks().forEach(t=>t.stop());meetingStream.mic.getTracks().forEach(t=>t.stop());meetingStream.ctx.close();meetingStream=null}
+        clearInterval(meetingInterval);
+        ws.send(JSON.stringify({type:'meeting_stop'}));
+        document.getElementById('recDot').style.animation='none';
+        document.getElementById('recDot').style.background='var(--text6)';
+        document.getElementById('meetingSummaryScreen').style.display='block';
+        const sel=document.getElementById('meetingSummaryModel');
+        const mainSel=document.getElementById('modelSelect');
+        sel.innerHTML=mainSel.innerHTML;sel.value=mainSel.value;
+    }
+
+    function minimizeMeeting(){document.getElementById('meetingModal').classList.toggle('minimized')}
+
+    function generateMeetingSummary(){
+        const model=document.getElementById('meetingSummaryModel').value;
+        document.getElementById('meetingSummaryContent').innerHTML='<p style="color:var(--text5)">Generating summary...</p>';
+        ws.send(JSON.stringify({type:'meeting_summarize',model:model}));
+    }
+
+    function saveMeeting(){document.getElementById('meetingModal').style.display='none';loadMeetings()}
+
+    function handleMeetingTranscript(m){
+        const el=document.getElementById('meetingTranscript');
+        if(el.querySelector('.meeting-placeholder'))el.innerHTML='';
+        const p=document.createElement('p');p.textContent=m.text;
+        p.style.borderBottom='1px solid var(--border)';p.style.paddingBottom='6px';p.style.marginBottom='6px';
+        el.appendChild(p);el.scrollTop=el.scrollHeight;
+    }
+
+    function handleMeetingSummary(m){
+        document.getElementById('meetingSummaryContent').innerHTML=
+            '<h4 style="color:#8b5cf6;margin-bottom:8px">'+m.title+'</h4>'+
+            '<ul style="margin:0 0 12px 16px">'+m.summary.map(s=>'<li>'+s+'</li>').join('')+'</ul>'+
+            (m.action_items.length?'<h4 style="margin-bottom:6px">Action Items</h4><ul style="margin:0 0 0 16px">'+m.action_items.map(a=>'<li>'+a+'</li>').join('')+'</ul>':'');
+        document.getElementById('meetingSaveBtn').style.display='block';
+    }
+
+    function handleMeetingError(m){
+        document.getElementById('meetingSummaryContent').innerHTML='<p style="color:#ef4444">'+m.message+'</p>';
+    }
+
     // ---- Admin Dashboard ----
     function openAdmin() {
         document.getElementById('adminOverlay').classList.add('open');
@@ -648,6 +790,9 @@
             else if(m.type==='model_changed'){}
             else if(m.type==='persona_changed'){document.getElementById('personaLabel').textContent=m.name}
             else if(m.type==='title_updated'){loadConvList()}
+            else if(m.type==='meeting_transcript') handleMeetingTranscript(m);
+            else if(m.type==='meeting_summary') handleMeetingSummary(m);
+            else if(m.type==='meeting_error') handleMeetingError(m);
         };
     }
 
@@ -1341,6 +1486,53 @@
     function toggleTheme(){const l=document.documentElement.getAttribute('data-theme')==='light';const n=l?'dark':'light';n==='light'?document.documentElement.setAttribute('data-theme','light'):document.documentElement.removeAttribute('data-theme');localStorage.setItem('theme',n);updateThemeBtn(n)}
     updateThemeBtn(document.documentElement.getAttribute('data-theme')||'dark');
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change',e=>{if(!localStorage.getItem('theme')){const t=e.matches?'light':'dark';t==='light'?document.documentElement.setAttribute('data-theme','light'):document.documentElement.removeAttribute('data-theme');updateThemeBtn(t)}});
+
+    // ---- Meetings History ----
+    function switchSidebarTab(tab,btn){
+        document.querySelectorAll('.sidebar-tab').forEach(t=>t.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('conversationsTab').style.display=tab==='conversations'?'block':'none';
+        document.getElementById('meetingsTab').style.display=tab==='meetings'?'block':'none';
+        if(tab==='meetings')loadMeetings();
+    }
+
+    async function loadMeetings(){
+        try{
+            const resp=await authFetch('/api/meetings');const meetings=await resp.json();
+            document.getElementById('meetingsList').innerHTML=meetings.map(m=>{
+                const date=new Date(m.created_at).toLocaleDateString();
+                const mins=Math.floor((m.duration_seconds||0)/60);
+                const actions=(m.action_items||[]).length;
+                return '<div class="conv-item" onclick="viewMeeting('+m.id+')"><div style="font-weight:600;font-size:13px">'+(m.title||'Untitled')+'</div><div style="font-size:11px;color:var(--text5)">'+date+' · '+mins+'min · '+actions+' actions</div></div>';
+            }).join('')||'<p style="color:var(--text6);padding:12px;font-size:13px">No meetings yet</p>';
+        }catch(e){}
+    }
+
+    async function searchMeetings(query){
+        if(!query.trim()){loadMeetings();return}
+        try{
+            const resp=await authFetch('/api/meetings/search?q='+encodeURIComponent(query));
+            const results=await resp.json();
+            document.getElementById('meetingsList').innerHTML=results.map(r=>
+                '<div class="conv-item" onclick="viewMeeting('+r.source_id+')"><div style="font-weight:600;font-size:13px">'+(r.title||'Match')+'</div><div style="font-size:11px;color:var(--text5)">'+(r.date||'')+' · '+Math.round((r.similarity||0)*100)+'% match</div><div style="font-size:12px;color:var(--text4);margin-top:4px">'+r.content.substring(0,100)+'...</div></div>'
+            ).join('')||'<p style="color:var(--text6);padding:12px;font-size:13px">No results</p>';
+        }catch(e){}
+    }
+
+    async function viewMeeting(id){
+        try{
+            const resp=await authFetch('/api/meetings/'+id);const m=await resp.json();
+            const chatBox=document.getElementById('chatBox');
+            chatBox.innerHTML='<div style="padding:20px;max-width:700px;margin:0 auto">'+
+                '<h2 style="color:#8b5cf6;margin-bottom:4px">'+m.title+'</h2>'+
+                '<p style="color:var(--text5);font-size:12px;margin-bottom:16px">'+new Date(m.created_at).toLocaleString()+' · '+Math.floor((m.duration_seconds||0)/60)+' min · '+(m.model_used||'N/A')+'</p>'+
+                (m.summary?'<h3 style="margin-bottom:8px">Summary</h3><div style="margin-bottom:16px;line-height:1.6">'+m.summary+'</div>':'')+
+                ((m.action_items||[]).length?'<h3 style="margin-bottom:8px">Action Items</h3><ul style="margin-bottom:16px">'+m.action_items.map(a=>'<li>'+a+'</li>').join('')+'</ul>':'')+
+                '<h3 style="margin-bottom:8px">Transcript</h3>'+
+                '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;line-height:1.6;max-height:400px;overflow-y:auto;white-space:pre-wrap">'+(m.transcript||'No transcript')+'</div>'+
+                '</div>';
+        }catch(e){}
+    }
 
     // Initialize: check auth first, data loads after auth succeeds
     checkAuth();
