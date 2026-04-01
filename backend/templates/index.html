@@ -315,6 +315,12 @@
             </div>
             <div class="tab-content" id="tab-apikeys">
                 <div class="settings-section">
+                  <h3>Meeting Extension</h3>
+                  <p class="settings-hint">Install our Chrome Extension to record Google Meet meetings. Copy the token below and paste it in the extension.</p>
+                  <div style="display:flex;gap:8px;margin-bottom:16px">
+                    <input type="text" id="extTokenDisplay" readonly style="flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:6px;font-size:11px;font-family:monospace" value="Click to generate">
+                    <button onclick="copyExtToken()" style="background:#8b5cf6;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap">Copy Token</button>
+                  </div>
                   <h3>API Keys</h3>
                   <p class="settings-hint">Add your own API keys to use different AI providers. Keys are encrypted and stored securely.</p>
                   <div id="apiKeysContainer"></div>
@@ -368,7 +374,7 @@
         <div class="header-right">
             <select class="model-select" id="voiceSelect" onchange="switchVoice(this.value)"></select>
             <select class="model-select" id="modelSelect" onchange="switchModel(this.value)"></select>
-            <button class="icon-btn" id="recordMeetingBtn" onclick="startMeetingRecording()">Record Meeting</button>
+            <button class="icon-btn" id="recordMeetingBtn" onclick="showMeetingJoinDialog()">Join Meeting</button>
             <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">&#9728;</button>
             <div id="userMenu" class="user-menu" style="display:none">
               <button class="user-avatar" onclick="toggleUserDropdown()">
@@ -418,6 +424,24 @@
                 <div id="adminUserList"></div>
             </div>
         </div>
+    </div>
+
+    <!-- Meeting Join Dialog -->
+    <div class="settings-overlay" id="meetingJoinOverlay" style="display:none" onclick="if(event.target===this)closeMeetingJoinDialog()">
+      <div class="auth-box" style="max-width:450px">
+        <h2 style="color:#8b5cf6;margin-bottom:8px">Join Meeting</h2>
+        <p style="color:var(--text5);font-size:13px;margin-bottom:16px">Paste your Google Meet link. Our AI bot will join the meeting, record audio, and transcribe in real-time.</p>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <input type="text" id="meetUrlInput" placeholder="https://meet.google.com/abc-defg-hij" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:12px 16px;border-radius:8px;font-size:14px;outline:none">
+          <input type="text" id="meetBotName" placeholder="Bot name (default: AI Recorder)" value="AI Recorder" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;outline:none">
+          <div style="display:flex;gap:8px">
+            <button onclick="joinMeetingBot()" style="flex:1;background:#8b5cf6;color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600">Join with Bot</button>
+            <button onclick="startMeetingRecording()" style="flex:1;background:var(--surface);color:var(--text3);border:1px solid var(--border);padding:12px;border-radius:8px;font-size:14px;cursor:pointer">Share Tab Instead</button>
+          </div>
+          <p style="color:var(--text6);font-size:11px;text-align:center">Bot joins as a participant. You may need to admit it from the meeting.</p>
+        </div>
+        <div id="meetJoinError" style="color:#ef4444;font-size:13px;margin-top:8px"></div>
+      </div>
     </div>
 
     <!-- Meeting Recorder Modal -->
@@ -620,7 +644,45 @@
         loadApiKeys();
     }
 
-    // ---- Meeting Recorder ----
+    function copyExtToken() {
+        const el = document.getElementById('extTokenDisplay');
+        el.value = accessToken || 'Not logged in';
+        navigator.clipboard.writeText(accessToken).then(() => {
+            el.value = 'Copied!';
+            setTimeout(() => { el.value = accessToken; }, 2000);
+        });
+    }
+
+    // ---- Meeting Join Dialog ----
+    function showMeetingJoinDialog(){
+        document.getElementById('meetingJoinOverlay').style.display='flex';
+        document.getElementById('meetUrlInput').focus();
+        document.getElementById('meetJoinError').textContent='';
+    }
+    function closeMeetingJoinDialog(){
+        document.getElementById('meetingJoinOverlay').style.display='none';
+    }
+    function joinMeetingBot(){
+        const url=document.getElementById('meetUrlInput').value.trim();
+        if(!url||!url.includes('meet.google.com')){
+            document.getElementById('meetJoinError').textContent='Please enter a valid Google Meet link';
+            return;
+        }
+        closeMeetingJoinDialog();
+        // Show meeting modal
+        document.getElementById('meetingModal').style.display='flex';
+        document.getElementById('meetingSummaryScreen').style.display='none';
+        document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Bot is joining the meeting...</p>';
+        document.getElementById('recDot').style.animation='pulse-rec 1s infinite';
+        document.getElementById('recDot').style.background='#ef4444';
+        document.getElementById('recordMeetingBtn').style.display='none';
+        meetingSeconds=0;meetingPaused=false;meetingRecordingActive=true;meetingStopCount=0;
+        meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
+        // Tell backend to join via bot
+        ws.send(JSON.stringify({type:'meeting_join',url:url}));
+    }
+
+    // ---- Meeting Recorder (Tab Capture Fallback) ----
     let meetingStream=null,meetingInterval=null,meetingSeconds=0,meetingPaused=false,meetingRecordingActive=false;
 
     async function startMeetingRecording(){

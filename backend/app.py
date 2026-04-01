@@ -1185,6 +1185,97 @@ async def _stream_anthropic(messages, ws, model, cancel_event, voice, api_key, t
     return full_response.strip()
 
 
+# ---- Meeting Extension WebSocket ----
+@app.websocket("/ws-meeting")
+async def meeting_ws_endpoint(ws: WebSocket):
+    """Dedicated WebSocket for the Chrome extension meeting recorder."""
+    await ws.accept()
+    user_id = await get_user_id_from_ws(ws)
+    if not user_id:
+        await ws.send_json({"type": "error", "message": "Not authenticated"})
+        await ws.close()
+        return
+
+    meeting_transcript_chunks = []
+    meeting_start_time = 0
+    meeting_active = False
+
+    # Get user keys for summarization
+    user_keys = {}
+    for prov in ["openai", "anthropic", "groq", "google"]:
+        k = await get_decrypted_key(user_id, prov)
+        if k:
+            user_keys[prov] = k
+
+    logger.info(f"Meeting extension connected for user {user_id}")
+
+    try:
+        while True:
+            message = await ws.receive()
+
+            # Binary data = audio chunk
+            if "bytes" in message:
+                data = message["bytes"]
+                if data and meeting_active and len(data) > 500:
+                    logger.info(f"Meeting ext: received {len(data)} bytes")
+                    text = await asyncio.to_thread(transcribe_audio_sync, data, True)
+                    if text:
+                        meeting_transcript_chunks.append(text)
+                        await ws.send_json({
+                            "type": "meeting_transcript",
+                            "text": text,
+                            "chunk_index": len(meeting_transcript_chunks) - 1,
+                        })
+                continue
+
+            if "text" not in message:
+                continue
+
+            try:
+                msg = json.loads(message["text"])
+            except json.JSONDecodeError:
+                continue
+
+            if msg.get("type") == "meeting_start":
+                meeting_transcript_chunks = []
+                meeting_start_time = asyncio.get_event_loop().time()
+                meeting_active = True
+                logger.info("Meeting extension: recording started")
+                await ws.send_json({"type": "meeting_started"})
+
+            elif msg.get("type") == "meeting_stop":
+                meeting_active = False
+                full_transcript = "\n".join(meeting_transcript_chunks)
+                duration = int(asyncio.get_event_loop().time() - meeting_start_time)
+                logger.info(f"Meeting extension: stopped. {duration}s, {len(meeting_transcript_chunks)} chunks")
+                await ws.send_json({"type": "meeting_stopped", "transcript": full_transcript, "duration": duration})
+
+            elif msg.get("type") == "meeting_summarize":
+                summary_model = msg.get("model", "gpt-4o-mini")
+                full_transcript = "\n".join(meeting_transcript_chunks)
+                duration = int(asyncio.get_event_loop().time() - meeting_start_time)
+                if not full_transcript.strip():
+                    await ws.send_json({"type": "meeting_error", "message": "No transcript to summarize"})
+                    continue
+                try:
+                    result = await summarize_meeting(full_transcript, summary_model, user_keys)
+                    mid = await create_meeting(user_id, result["title"], full_transcript, duration)
+                    await update_meeting_summary(mid, result["title"], "\n".join(result["summary"]),
+                                                 result["action_items"], summary_model)
+                    await ws.send_json({
+                        "type": "meeting_summary", "id": mid, "title": result["title"],
+                        "summary": result["summary"], "action_items": result["action_items"],
+                    })
+                except Exception as e:
+                    logger.error(f"Meeting summary error: {e}")
+                    await ws.send_json({"type": "meeting_error", "message": str(e)})
+
+    except WebSocketDisconnect:
+        logger.info("Meeting extension disconnected")
+    except Exception as e:
+        logger.error(f"Meeting WS error: {e}")
+
+
 # ---- WebSocket ----
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -1215,6 +1306,8 @@ async def websocket_endpoint(ws: WebSocket):
     meeting_active = False
     meeting_transcript_chunks = []
     meeting_start_time = 0
+    meeting_bot_stop = None
+    meeting_bot_task = None
 
     async def cancel_llm():
         """Cancel any running LLM stream and clean up chat history."""
@@ -1372,12 +1465,70 @@ async def websocket_endpoint(ws: WebSocket):
                     meeting_transcript_chunks = []
                     meeting_start_time = asyncio.get_event_loop().time()
                     meeting_active = True
-                    logger.info("Meeting recording started")
+                    logger.info("Meeting recording started (tab capture mode)")
                     await ws.send_json({"type": "meeting_started"})
+                    continue
+
+                if msg.get("type") == "meeting_join":
+                    meet_url = msg.get("url", "").strip()
+                    if not meet_url or "meet.google.com" not in meet_url:
+                        await ws.send_json({"type": "meeting_error", "message": "Invalid Google Meet URL"})
+                        continue
+                    meeting_transcript_chunks = []
+                    meeting_start_time = asyncio.get_event_loop().time()
+                    meeting_active = True
+                    meeting_bot_stop = asyncio.Event()
+                    logger.info(f"Meeting bot joining: {meet_url}")
+                    await ws.send_json({"type": "meeting_started", "mode": "bot"})
+
+                    # Audio chunk callback — transcribe and send to client
+                    async def on_meeting_audio(audio_bytes):
+                        if not meeting_active:
+                            return
+                        text = await asyncio.to_thread(transcribe_audio_sync, audio_bytes, True)
+                        if text:
+                            meeting_transcript_chunks.append(text)
+                            await ws.send_json({
+                                "type": "meeting_transcript",
+                                "text": text,
+                                "chunk_index": len(meeting_transcript_chunks) - 1,
+                            })
+
+                    # Run bot in background
+                    from meet_bot import join_meet
+                    async def run_meet_bot():
+                        nonlocal meeting_active
+                        try:
+                            await join_meet(
+                                meet_url=meet_url,
+                                bot_name="AI Recorder",
+                                on_audio_chunk=on_meeting_audio,
+                                stop_event=meeting_bot_stop,
+                            )
+                        except Exception as e:
+                            logger.error(f"Meet bot error: {e}")
+                            try:
+                                await ws.send_json({"type": "meeting_error", "message": f"Bot error: {str(e)}"})
+                            except Exception:
+                                pass
+                        finally:
+                            if meeting_active:
+                                meeting_active = False
+                                try:
+                                    await ws.send_json({"type": "meeting_stopped",
+                                        "transcript": "\n".join(meeting_transcript_chunks),
+                                        "duration": int(asyncio.get_event_loop().time() - meeting_start_time)})
+                                except Exception:
+                                    pass
+
+                    meeting_bot_task = asyncio.create_task(run_meet_bot())
                     continue
 
                 if msg.get("type") == "meeting_stop":
                     meeting_active = False
+                    # Stop the bot if running
+                    if 'meeting_bot_stop' in dir() and meeting_bot_stop:
+                        meeting_bot_stop.set()
                     full_transcript = "\n".join(meeting_transcript_chunks)
                     duration = int(asyncio.get_event_loop().time() - meeting_start_time)
                     logger.info(f"Meeting stopped: {duration}s, {len(meeting_transcript_chunks)} chunks")
