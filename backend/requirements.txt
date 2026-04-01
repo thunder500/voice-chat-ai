@@ -19,4 +19,5 @@ cryptography>=43.0.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
 chromadb-client>=0.5.0
+deepgram-sdk>=3.0.0
 playwright>=1.45.0

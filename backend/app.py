@@ -757,11 +757,16 @@ async def upload_meeting_audio(request: Request, audio: UploadFile = File(...), 
 
     logger.info(f"Meeting upload: {len(audio_bytes)} bytes, {duration}s")
 
-    # Transcribe the full audio
-    text = await asyncio.to_thread(transcribe_audio_sync, audio_bytes, True)
-    if not text:
-        # Try without meeting mode
-        text = await asyncio.to_thread(transcribe_audio_sync, audio_bytes, False)
+    # Get user keys for transcription providers
+    user_keys = {}
+    for prov in ["deepgram", "groq", "openai"]:
+        k = await get_decrypted_key(user_id, prov)
+        if k:
+            user_keys[prov] = k
+
+    # Transcribe with best available provider (Deepgram > Groq > OpenAI > local)
+    from transcription import transcribe_meeting
+    text = await transcribe_meeting(audio_bytes, user_keys, whisper_model)
     if not text:
         text = "(No speech detected in audio)"
 
