@@ -644,13 +644,20 @@
         loadApiKeys();
     }
 
-    function copyExtToken() {
+    async function copyExtToken() {
         const el = document.getElementById('extTokenDisplay');
-        el.value = accessToken || 'Not logged in';
-        navigator.clipboard.writeText(accessToken).then(() => {
-            el.value = 'Copied!';
-            setTimeout(() => { el.value = accessToken; }, 2000);
-        });
+        try {
+            const resp = await authFetch('/api/auth/meeting-token');
+            const data = await resp.json();
+            const meetingToken = data.token;
+            el.value = meetingToken;
+            navigator.clipboard.writeText(meetingToken).then(() => {
+                el.value = 'Copied! (valid 24 hours)';
+                setTimeout(() => { el.value = meetingToken; }, 2000);
+            });
+        } catch(e) {
+            el.value = 'Error getting token';
+        }
     }
 
     // ---- Meeting Recorder ----

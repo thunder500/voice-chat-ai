@@ -308,6 +308,17 @@ async def refresh_token(request: Request):
     return JSONResponse(content={"access_token": access_token, "token_type": "bearer"})
 
 
+@app.get("/api/auth/meeting-token")
+async def get_meeting_token(request: Request):
+    """Generate a long-lived token (24h) for the Chrome extension."""
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    from datetime import timedelta
+    token = create_access_token(user_id, expires_delta=timedelta(hours=24))
+    return JSONResponse(content={"token": token})
+
+
 @app.get("/api/auth/me")
 async def get_me(request: Request):
     user_id = get_user_id_from_request(request)
