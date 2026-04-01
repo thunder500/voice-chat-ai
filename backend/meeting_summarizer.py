@@ -9,10 +9,15 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434")
 
-SUMMARY_PROMPT = """You are analyzing a meeting transcript. Generate:
-1. A concise title (under 60 chars)
-2. A summary in 3-5 bullet points covering key decisions and discussions
-3. A list of action items with who is responsible (if mentioned)
+SUMMARY_PROMPT = """You are analyzing a meeting transcript. The transcript may be in any language.
+ALWAYS respond in English regardless of the transcript language.
+If the transcript is not in English, translate the key points to English.
+
+Generate:
+1. A concise title in English (under 60 chars)
+2. A summary in 3-5 bullet points in English covering key decisions and discussions
+3. A list of action items in English with who is responsible (if mentioned)
+4. If speaker names are mentioned in the conversation, map "Speaker 0", "Speaker 1" etc to their actual names
 
 Format as JSON:
 {

@@ -60,7 +60,7 @@ async def _transcribe_deepgram(audio_bytes: bytes, api_key: str) -> str | None:
                     "diarize": "true",
                     "punctuate": "true",
                     "utterances": "true",
-                    "language": "en",
+                    "detect_language": "true",
                 },
                 headers={
                     "Authorization": f"Token {api_key}",
@@ -70,10 +70,17 @@ async def _transcribe_deepgram(audio_bytes: bytes, api_key: str) -> str | None:
             )
             resp.raise_for_status()
             result = resp.json()
+
+        # Detect language
+        detected_lang = result.get("results", {}).get("channels", [{}])[0].get("detected_language", "en")
+        logger.info(f"Deepgram detected language: {detected_lang}")
+
         utterances = result.get("results", {}).get("utterances", [])
 
         if utterances:
             lines = []
+            if detected_lang != "en":
+                lines.append(f"[Language detected: {detected_lang}]")
             for u in utterances:
                 speaker = f"Speaker {u.get('speaker', '?')}"
                 text = u.get("transcript", "")
@@ -116,7 +123,7 @@ async def _transcribe_groq(audio_bytes: bytes, api_key: str) -> str | None:
                     "https://api.groq.com/openai/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {api_key}"},
                     files={"file": ("meeting.webm", f, "audio/webm")},
-                    data={"model": "whisper-large-v3", "language": "en", "response_format": "verbose_json"},
+                    data={"model": "whisper-large-v3", "response_format": "verbose_json"},
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -156,7 +163,6 @@ async def _transcribe_openai(audio_bytes: bytes, api_key: str) -> str | None:
             resp = await client.audio.transcriptions.create(
                 model="whisper-1",
                 file=f,
-                language="en",
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
             )
@@ -192,7 +198,7 @@ async def _transcribe_local(audio_bytes: bytes, whisper_model) -> str | None:
         def _do():
             segments, info = whisper_model.transcribe(
                 tmp_path, beam_size=3, best_of=2, temperature=0,
-                language="en", condition_on_previous_text=True,
+                condition_on_previous_text=True,
                 no_speech_threshold=0.8, log_prob_threshold=-1.5,
             )
             lines = []

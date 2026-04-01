@@ -1397,7 +1397,7 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("Meeting extension disconnected")
-        if meeting_audio_chunks and len(meeting_audio_chunks) > 2:
+        if meeting_audio_chunks and len(meeting_audio_chunks) >= 3:
             meeting_active = False
             logger.info(f"Saving meeting from {len(meeting_audio_chunks)} chunks on disconnect...")
             try:
@@ -1406,7 +1406,7 @@ async def meeting_ws_endpoint(ws: WebSocket):
                 logger.error(f"Failed to save on disconnect: {e}")
     except Exception as e:
         logger.error(f"Meeting WS error: {e}")
-        if meeting_audio_chunks and len(meeting_audio_chunks) > 2:
+        if meeting_audio_chunks and len(meeting_audio_chunks) >= 3:
             meeting_active = False
             try:
                 await save_meeting_from_audio()
