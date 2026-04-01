@@ -23,7 +23,10 @@ from models import (
     search_conversations, toggle_star_conversation,
     add_knowledge, get_all_knowledge, delete_knowledge, search_knowledge,
     get_personas, get_persona, add_persona, delete_persona,
+    create_meeting, update_meeting_summary, get_meeting,
+    get_meetings, delete_meeting, update_meeting_kb_toggle,
 )
+from meeting_summarizer import summarize_meeting
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_user_id_from_request, get_user_id_from_ws,
@@ -729,6 +732,77 @@ async def remove_persona(pid: int, request: Request):
     return JSONResponse(content={"ok": True})
 
 
+# ---- Meetings API ----
+@app.get("/api/meetings")
+async def list_meetings(request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    return JSONResponse(content=await get_meetings(user_id))
+
+
+@app.get("/api/meetings/search")
+async def search_meetings_endpoint(request: Request, q: str = ""):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    if not q.strip():
+        return JSONResponse(content=await get_meetings(user_id))
+    from embeddings import embed_query
+    from vectorstore import search as vector_search
+    openai_key = await get_decrypted_key(user_id, "openai")
+    query_emb = await embed_query(q, openai_key)
+    results = await vector_search(user_id, query_emb, n_results=10, source_type="meeting")
+    return JSONResponse(content=results)
+
+
+@app.get("/api/meetings/{mid}")
+async def get_meeting_detail(mid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    meeting = await get_meeting(mid, user_id)
+    if not meeting:
+        return JSONResponse(content={"error": "Not found"}, status_code=404)
+    return JSONResponse(content=meeting)
+
+
+@app.delete("/api/meetings/{mid}")
+async def remove_meeting(mid: int, request: Request):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    from vectorstore import delete_source
+    await delete_source(user_id, mid, "meeting")
+    await delete_meeting(mid, user_id)
+    return JSONResponse(content={"ok": True})
+
+
+@app.patch("/api/meetings/{mid}")
+async def patch_meeting(mid: int, request: Request, data: dict):
+    user_id = get_user_id_from_request(request)
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    if "in_knowledge_base" in data:
+        in_kb = bool(data["in_knowledge_base"])
+        await update_meeting_kb_toggle(mid, user_id, in_kb)
+        meeting = await get_meeting(mid, user_id)
+        if meeting:
+            from vectorstore import delete_source
+            if in_kb and meeting.get("summary"):
+                from embeddings import chunk_text, embed_texts
+                from vectorstore import add_chunks
+                openai_key = await get_decrypted_key(user_id, "openai")
+                text = f"{meeting['title']}\n\n{meeting['summary']}\n\nAction Items: {json.dumps(meeting.get('action_items', []))}"
+                chunks = chunk_text(text)
+                embeddings = await embed_texts(chunks, openai_key)
+                await add_chunks(user_id, mid, "meeting", meeting["title"],
+                                 str(meeting.get("created_at", ""))[:10], chunks, embeddings)
+            else:
+                await delete_source(user_id, mid, "meeting")
+    return JSONResponse(content={"ok": True})
+
+
 # ---- Whisper STT (for WebRTC fallback) ----
 HALLUCINATION_FILTER = {
     "", "you", "thank you", "thanks", "bye", "the end", "thanks for watching",
@@ -1118,6 +1192,9 @@ async def websocket_endpoint(ws: WebSocket):
     greeted = False
     llm_task = None
     cancel_event = asyncio.Event()
+    meeting_active = False
+    meeting_transcript_chunks = []
+    meeting_start_time = 0
 
     async def cancel_llm():
         """Cancel any running LLM stream and clean up chat history."""
@@ -1146,6 +1223,18 @@ async def websocket_endpoint(ws: WebSocket):
                 if not data:
                     continue
                 logger.info(f"Received {len(data)} bytes of audio (WebRTC fallback)")
+
+                if data and meeting_active:
+                    chunk_text_result = await asyncio.to_thread(transcribe_audio_sync, data)
+                    if chunk_text_result:
+                        meeting_transcript_chunks.append(chunk_text_result)
+                        await ws.send_json({
+                            "type": "meeting_transcript",
+                            "text": chunk_text_result,
+                            "chunk_index": len(meeting_transcript_chunks) - 1,
+                        })
+                    continue
+
                 # Cancel any running LLM stream — user is interrupting
                 await cancel_llm()
                 user_text = await asyncio.to_thread(transcribe_audio_sync, data)
@@ -1257,6 +1346,48 @@ async def websocket_endpoint(ws: WebSocket):
 
                     logger.info(f"Loaded conversation {cid}: {len(past_msgs)} msgs, {len(chat_history)} in context")
                     await ws.send_json({"type": "ready"})
+                    continue
+
+                if msg.get("type") == "meeting_start":
+                    meeting_transcript_chunks = []
+                    meeting_start_time = asyncio.get_event_loop().time()
+                    meeting_active = True
+                    logger.info("Meeting recording started")
+                    await ws.send_json({"type": "meeting_started"})
+                    continue
+
+                if msg.get("type") == "meeting_stop":
+                    meeting_active = False
+                    full_transcript = "\n".join(meeting_transcript_chunks)
+                    duration = int(asyncio.get_event_loop().time() - meeting_start_time)
+                    logger.info(f"Meeting stopped: {duration}s, {len(meeting_transcript_chunks)} chunks")
+                    await ws.send_json({"type": "meeting_stopped", "transcript": full_transcript, "duration": duration})
+                    continue
+
+                if msg.get("type") == "meeting_summarize":
+                    summary_model = msg.get("model", current_model)
+                    full_transcript = "\n".join(meeting_transcript_chunks)
+                    duration = int(asyncio.get_event_loop().time() - meeting_start_time)
+                    try:
+                        result = await summarize_meeting(full_transcript, summary_model, user_keys)
+                        mid = await create_meeting(user_id, result["title"], full_transcript, duration)
+                        await update_meeting_summary(mid, result["title"], "\n".join(result["summary"]),
+                                                     result["action_items"], summary_model)
+                        # Auto-vectorize
+                        from embeddings import chunk_text, embed_texts
+                        from vectorstore import add_chunks
+                        openai_key = user_keys.get("openai")
+                        text = f"{result['title']}\n\n{chr(10).join(result['summary'])}\n\nAction Items: {json.dumps(result['action_items'])}"
+                        chunks = chunk_text(text)
+                        embeddings = await embed_texts(chunks, openai_key)
+                        await add_chunks(user_id, mid, "meeting", result["title"], "", chunks, embeddings)
+                        await ws.send_json({
+                            "type": "meeting_summary", "id": mid, "title": result["title"],
+                            "summary": result["summary"], "action_items": result["action_items"],
+                        })
+                    except Exception as e:
+                        logger.error(f"Meeting summary error: {e}")
+                        await ws.send_json({"type": "meeting_error", "message": str(e)})
                     continue
 
                 if msg.get("type") != "text":
