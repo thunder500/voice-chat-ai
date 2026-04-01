@@ -683,6 +683,11 @@ async def upload_knowledge(
     else:
         return JSONResponse(content={"error": "No content or file provided"}, status_code=400)
 
+    # Vectorize into ChromaDB
+    from models.knowledge import vectorize_knowledge
+    user_openai_key_embed = await get_decrypted_key(user_id, "openai")
+    asyncio.create_task(vectorize_knowledge(user_id, kid, title or (file.filename if file else ""), text if 'text' in dir() else content, user_openai_key_embed))
+
     return JSONResponse(content={"id": kid})
 
 
@@ -691,6 +696,8 @@ async def remove_knowledge(kid: int, request: Request):
     user_id = get_user_id_from_request(request)
     if not user_id:
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    from models.knowledge import devectorize_knowledge
+    asyncio.create_task(devectorize_knowledge(user_id, kid))
     await delete_knowledge(user_id, kid)
     return JSONResponse(content={"ok": True})
 
@@ -1274,7 +1281,7 @@ async def websocket_endpoint(ws: WebSocket):
             await add_message(conversation_id, "user", user_text)
 
             # Search knowledge base for context
-            kb_results = await search_knowledge(user_id, user_text)
+            kb_results = await search_knowledge(user_id, user_text, openai_key=user_keys.get("openai"))
             if kb_results:
                 kb_context = "\n\n".join(f"[{r['title']}]: {r['content'][:500]}" for r in kb_results)
                 kb_msg = {"role": "system", "content": f"Relevant knowledge:\n{kb_context}\n\nUse this info if relevant to answer the user."}
