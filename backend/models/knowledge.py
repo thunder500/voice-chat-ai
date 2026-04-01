@@ -33,7 +33,10 @@ async def search_knowledge(user_id: str, query: str, limit: int = 5, openai_key:
         from embeddings import embed_query
         from vectorstore import search
         query_emb = await embed_query(query, openai_key)
-        results = await search(user_id, query_emb, n_results=limit)
+        if query_emb:
+            results = await search(user_id, query_emb, n_results=limit)
+        else:
+            results = await search(user_id, n_results=limit, query_text=query)
         if results:
             return results
     except Exception as e:

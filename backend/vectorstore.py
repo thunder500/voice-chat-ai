@@ -25,7 +25,8 @@ def _collection_name(user_id: str) -> str:
 
 
 async def add_chunks(user_id: str, source_id: int, source_type: str, title: str,
-                     date: str, chunks: list[str], embeddings: list[list[float]]):
+                     date: str, chunks: list[str], embeddings: list[list[float]] = None):
+    """Add chunks to ChromaDB. If embeddings is None, ChromaDB uses its default embedding."""
     import asyncio
     def _add():
         client = _get_client()
@@ -39,13 +40,17 @@ async def add_chunks(user_id: str, source_id: int, source_type: str, title: str,
              "title": title, "date": date, "chunk_index": i}
             for i in range(len(chunks))
         ]
-        collection.add(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+        kwargs = {"ids": ids, "documents": chunks, "metadatas": metadatas}
+        if embeddings:
+            kwargs["embeddings"] = embeddings
+        collection.add(**kwargs)
         logger.info(f"Added {len(chunks)} chunks to {_collection_name(user_id)} ({source_type}:{source_id})")
     await asyncio.to_thread(_add)
 
 
-async def search(user_id: str, query_embedding: list[float], n_results: int = 5,
-                 source_type: Optional[str] = None) -> list[dict]:
+async def search(user_id: str, query_embedding: list[float] = None, n_results: int = 5,
+                 source_type: Optional[str] = None, query_text: str = None) -> list[dict]:
+    """Search by embedding vector or by text (uses ChromaDB default embedding)."""
     import asyncio
     def _search():
         client = _get_client()
@@ -54,10 +59,15 @@ async def search(user_id: str, query_embedding: list[float], n_results: int = 5,
         except Exception:
             return []
         where_filter = {"source_type": source_type} if source_type else None
-        results = collection.query(
-            query_embeddings=[query_embedding], n_results=n_results,
-            where=where_filter, include=["documents", "metadatas", "distances"],
-        )
+        query_kwargs = {"n_results": n_results, "where": where_filter,
+                        "include": ["documents", "metadatas", "distances"]}
+        if query_embedding:
+            query_kwargs["query_embeddings"] = [query_embedding]
+        elif query_text:
+            query_kwargs["query_texts"] = [query_text]
+        else:
+            return []
+        results = collection.query(**query_kwargs)
         items = []
         if results and results["documents"]:
             for i, doc in enumerate(results["documents"][0]):

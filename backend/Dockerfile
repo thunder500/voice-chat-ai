@@ -14,8 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pre-download whisper base model
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
 
-# Pre-download sentence transformer model for embeddings
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Copy app code
 COPY . .
