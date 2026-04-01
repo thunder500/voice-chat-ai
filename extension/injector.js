@@ -7,6 +7,15 @@ let ws = null;
 let recording = false;
 let mediaRecorder = null;
 let stream = null;
+let savedServerUrl = 'http://localhost:8000';
+let savedToken = '';
+
+// Load settings immediately (chrome.storage works at top level in content scripts)
+chrome.storage.local.get(['serverUrl', 'authToken'], (data) => {
+  savedServerUrl = data.serverUrl || 'http://localhost:8000';
+  savedToken = data.authToken || '';
+  console.log('[VoiceChatAI] Token loaded:', savedToken ? 'yes' : 'no');
+});
 
 // Wait for page to load then add our button
 if (document.readyState === 'complete') {
@@ -49,13 +58,11 @@ async function toggleRecording() {
 }
 
 async function startRecording() {
-  // Get saved settings
-  const data = await chrome.storage.local.get(['serverUrl', 'authToken']);
-  const serverUrl = data.serverUrl || 'http://localhost:8000';
-  let token = data.authToken || '';
+  const serverUrl = savedServerUrl;
+  const token = savedToken;
 
   if (!token) {
-    showStatus('Open the extension popup (toolbar icon) and paste your auth token first!', true);
+    showStatus('Open the extension popup and paste your auth token first!', true);
     return;
   }
 
