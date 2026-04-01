@@ -621,47 +621,75 @@
     }
 
     // ---- Meeting Recorder ----
-    let meetingStream=null,meetingRecorder=null,meetingInterval=null,meetingSeconds=0,meetingPaused=false;
+    let meetingStream=null,meetingInterval=null,meetingSeconds=0,meetingPaused=false,meetingRecordingActive=false;
 
     async function startMeetingRecording(){
         try{
             const displayStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+            if(displayStream.getAudioTracks().length===0){
+                displayStream.getTracks().forEach(t=>t.stop());
+                alert('No audio detected! Check "Share tab audio" when sharing.');
+                return;
+            }
             const micStream=await navigator.mediaDevices.getUserMedia({audio:true});
             const audioCtx=new AudioContext();
             const dest=audioCtx.createMediaStreamDestination();
             audioCtx.createMediaStreamSource(displayStream).connect(dest);
             audioCtx.createMediaStreamSource(micStream).connect(dest);
-            meetingStream={display:displayStream,mic:micStream,ctx:audioCtx};
-            meetingRecorder=new MediaRecorder(dest.stream,{mimeType:'audio/webm;codecs=opus'});
-            meetingRecorder.ondataavailable=(e)=>{if(e.data.size>0&&ws&&ws.readyState===1)e.data.arrayBuffer().then(buf=>ws.send(buf))};
-            meetingRecorder.start(10000);
+            meetingStream={display:displayStream,mic:micStream,ctx:audioCtx,destStream:dest.stream};
+            meetingRecordingActive=true;
             ws.send(JSON.stringify({type:'meeting_start'}));
+            _meetingRecordChunk();
             document.getElementById('meetingModal').style.display='flex';
             document.getElementById('meetingSummaryScreen').style.display='none';
             document.getElementById('meetingTranscript').innerHTML='<p class="meeting-placeholder">Listening...</p>';
             document.getElementById('recDot').style.animation='pulse-rec 1s infinite';
             document.getElementById('recDot').style.background='#ef4444';
+            document.getElementById('recordMeetingBtn').style.display='none';
             meetingSeconds=0;meetingPaused=false;
-            meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;const m=String(Math.floor(meetingSeconds/60)).padStart(2,'0');const s=String(meetingSeconds%60).padStart(2,'0');document.getElementById('meetingTimer').textContent=m+':'+s}},1000);
+            meetingInterval=setInterval(()=>{if(!meetingPaused){meetingSeconds++;document.getElementById('meetingTimer').textContent=String(Math.floor(meetingSeconds/60)).padStart(2,'0')+':'+String(meetingSeconds%60).padStart(2,'0')}},1000);
             displayStream.getVideoTracks()[0].onended=()=>stopMeeting();
-        }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Make sure to share a browser tab with audio.')}
+        }catch(e){console.error('Meeting recording failed:',e);alert('Could not start recording. Share a browser tab with audio enabled.')}
+    }
+
+    function _meetingRecordChunk(){
+        if(!meetingRecordingActive||!meetingStream)return;
+        if(meetingPaused){setTimeout(_meetingRecordChunk,500);return}
+        const rec=new MediaRecorder(meetingStream.destStream,{mimeType:'audio/webm;codecs=opus'});
+        const parts=[];
+        rec.ondataavailable=(e)=>{if(e.data.size>0)parts.push(e.data)};
+        rec.onstop=()=>{
+            if(parts.length>0){
+                const blob=new Blob(parts,{type:'audio/webm'});
+                blob.arrayBuffer().then(buf=>{if(ws&&ws.readyState===1)ws.send(buf)}).catch(()=>{});
+            }
+            if(meetingRecordingActive)_meetingRecordChunk();
+        };
+        rec.start();
+        setTimeout(()=>{if(rec.state!=='inactive')rec.stop()},10000);
     }
 
     function pauseMeeting(){
         meetingPaused=!meetingPaused;
         document.getElementById('meetingPauseBtn').textContent=meetingPaused?'Resume':'Pause';
         document.getElementById('recDot').classList.toggle('paused',meetingPaused);
-        if(meetingPaused)meetingRecorder.pause();else meetingRecorder.resume();
+        if(!meetingPaused)_meetingRecordChunk();
     }
 
     function stopMeeting(){
-        if(meetingRecorder&&meetingRecorder.state!=='inactive')meetingRecorder.stop();
-        if(meetingStream){meetingStream.display.getTracks().forEach(t=>t.stop());meetingStream.mic.getTracks().forEach(t=>t.stop());meetingStream.ctx.close();meetingStream=null}
+        meetingRecordingActive=false;
+        if(meetingStream){
+            meetingStream.display.getTracks().forEach(t=>t.stop());
+            meetingStream.mic.getTracks().forEach(t=>t.stop());
+            try{meetingStream.ctx.close()}catch(e){}
+            meetingStream=null;
+        }
         clearInterval(meetingInterval);
-        ws.send(JSON.stringify({type:'meeting_stop'}));
+        if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'meeting_stop'}));
         document.getElementById('recDot').style.animation='none';
         document.getElementById('recDot').style.background='var(--text6)';
         document.getElementById('meetingSummaryScreen').style.display='block';
+        document.getElementById('recordMeetingBtn').style.display='';
         const sel=document.getElementById('meetingSummaryModel');
         const mainSel=document.getElementById('modelSelect');
         sel.innerHTML=mainSel.innerHTML;sel.value=mainSel.value;
@@ -671,6 +699,7 @@
 
     function generateMeetingSummary(){
         const model=document.getElementById('meetingSummaryModel').value;
+        if(!model){alert('Select a model first');return}
         document.getElementById('meetingSummaryContent').innerHTML='<p style="color:var(--text5)">Generating summary...</p>';
         ws.send(JSON.stringify({type:'meeting_summarize',model:model}));
     }
