@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Voice Chat AI - Meeting Recorder",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Record Google Meet audio and transcribe with AI",
-  "permissions": ["activeTab", "tabCapture", "storage", "offscreen"],
+  "permissions": ["activeTab", "tabCapture", "storage"],
   "host_permissions": [
     "https://meet.google.com/*",
     "http://localhost:8000/*",
@@ -22,12 +22,6 @@
       "matches": ["https://meet.google.com/*"],
       "js": ["injector.js"],
       "run_at": "document_start"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["content.js"],
-      "matches": ["https://meet.google.com/*"]
     }
   ],
   "background": {
