@@ -1293,17 +1293,37 @@ async def meeting_ws_endpoint(ws: WebSocket):
         return
 
     meeting_transcript_chunks = []
+    meeting_audio_chunks = []  # Store raw audio for full transcription later
     meeting_start_time = 0
     meeting_active = False
 
-    # Get user keys for summarization
+    # Get user keys for ALL providers
     user_keys = {}
-    for prov in ["openai", "anthropic", "groq", "google"]:
+    for prov in ["openai", "anthropic", "groq", "google", "deepgram"]:
         k = await get_decrypted_key(user_id, prov)
         if k:
             user_keys[prov] = k
 
     logger.info(f"Meeting extension connected for user {user_id}")
+
+    async def save_meeting_from_audio():
+        """Combine audio chunks and transcribe with best provider."""
+        if not meeting_audio_chunks:
+            return
+        duration = int(asyncio.get_event_loop().time() - meeting_start_time) if meeting_start_time else 0
+        combined_audio = b"".join(meeting_audio_chunks)
+        logger.info(f"Processing meeting: {len(meeting_audio_chunks)} chunks, {len(combined_audio)} bytes, {duration}s")
+
+        # Transcribe with Deepgram/Groq/OpenAI (full audio = better quality + speaker labels)
+        from transcription import transcribe_meeting
+        transcript = await transcribe_meeting(combined_audio, user_keys, whisper_model)
+        if not transcript or transcript == "(No transcription available)":
+            # Fallback to chunk-by-chunk transcripts
+            transcript = "\n".join(meeting_transcript_chunks) if meeting_transcript_chunks else "(No speech detected)"
+
+        mid = await create_meeting(user_id, "Meeting Recording", transcript, duration)
+        logger.info(f"Meeting saved: id={mid}, transcript={len(transcript)} chars")
+        return mid
 
     try:
         while True:
@@ -1313,15 +1333,21 @@ async def meeting_ws_endpoint(ws: WebSocket):
             if "bytes" in message:
                 data = message["bytes"]
                 if data and meeting_active and len(data) > 500:
-                    logger.info(f"Meeting ext: received {len(data)} bytes")
+                    logger.info(f"Meeting ext: received {len(data)} bytes (chunk #{len(meeting_audio_chunks)+1})")
+                    meeting_audio_chunks.append(data)
+
+                    # Quick local transcription for live preview (not saved)
                     text = await asyncio.to_thread(transcribe_audio_sync, data, True)
                     if text:
                         meeting_transcript_chunks.append(text)
-                        await ws.send_json({
-                            "type": "meeting_transcript",
-                            "text": text,
-                            "chunk_index": len(meeting_transcript_chunks) - 1,
-                        })
+                        try:
+                            await ws.send_json({
+                                "type": "meeting_transcript",
+                                "text": text,
+                                "chunk_index": len(meeting_transcript_chunks) - 1,
+                            })
+                        except Exception:
+                            pass
                 continue
 
             if "text" not in message:
@@ -1334,6 +1360,7 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
             if msg.get("type") == "meeting_start":
                 meeting_transcript_chunks = []
+                meeting_audio_chunks = []
                 meeting_start_time = asyncio.get_event_loop().time()
                 meeting_active = True
                 logger.info("Meeting extension: recording started")
@@ -1341,17 +1368,12 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
             elif msg.get("type") == "meeting_stop":
                 meeting_active = False
-                full_transcript = "\n".join(meeting_transcript_chunks)
-                duration = int(asyncio.get_event_loop().time() - meeting_start_time)
-                logger.info(f"Meeting extension: stopped. {duration}s, {len(meeting_transcript_chunks)} chunks")
-
-                # Auto-save the meeting to database
-                if full_transcript.strip():
-                    mid = await create_meeting(user_id, "Meeting Recording", full_transcript, duration)
-                    logger.info(f"Meeting saved: id={mid}")
-                    await ws.send_json({"type": "meeting_stopped", "id": mid, "transcript": full_transcript, "duration": duration})
-                else:
-                    await ws.send_json({"type": "meeting_stopped", "transcript": "", "duration": duration})
+                logger.info(f"Meeting extension: stopped. {len(meeting_audio_chunks)} audio chunks")
+                mid = await save_meeting_from_audio()
+                try:
+                    await ws.send_json({"type": "meeting_stopped", "id": mid})
+                except Exception:
+                    pass
 
             elif msg.get("type") == "meeting_summarize":
                 summary_model = msg.get("model", "gpt-4o-mini")
@@ -1375,8 +1397,21 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("Meeting extension disconnected")
+        # Save meeting on unexpected disconnect too
+        if meeting_active and meeting_audio_chunks:
+            meeting_active = False
+            try:
+                await save_meeting_from_audio()
+            except Exception as e:
+                logger.error(f"Failed to save on disconnect: {e}")
     except Exception as e:
         logger.error(f"Meeting WS error: {e}")
+        if meeting_active and meeting_audio_chunks:
+            meeting_active = False
+            try:
+                await save_meeting_from_audio()
+            except Exception as ex:
+                logger.error(f"Failed to save on error: {ex}")
 
 
 # ---- WebSocket ----
