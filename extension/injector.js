@@ -108,15 +108,40 @@ async function startRecording() {
 
   showStatus('Connecting to server...');
 
+  // Scrape participant names from Google Meet DOM
+  const participants = [];
+  try {
+    // Google Meet shows participant names in various places
+    document.querySelectorAll('[data-participant-id] [data-self-name], [data-participant-id] .zWGUib, .KV1GEc, .cS7aqe, .ZjFb7c').forEach(el => {
+      const name = el.textContent.trim();
+      if (name && name.length > 1 && !participants.includes(name)) participants.push(name);
+    });
+    // Also try the bottom bar names
+    document.querySelectorAll('.dwSJ2e, .gMhkke').forEach(el => {
+      const name = el.textContent.trim();
+      if (name && name.length > 1 && name !== 'You' && !participants.includes(name)) participants.push(name);
+    });
+    // Fallback: get from title or any visible name elements
+    if (participants.length === 0) {
+      document.querySelectorAll('[data-self-name]').forEach(el => {
+        const name = el.getAttribute('data-self-name');
+        if (name && !participants.includes(name)) participants.push(name);
+      });
+    }
+    console.log('[VoiceChatAI] Participants found:', participants);
+  } catch(e) {
+    console.log('[VoiceChatAI] Could not scrape participants:', e);
+  }
+
   // Connect WebSocket
   const wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws-meeting?token=' + token;
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     console.log('[VoiceChatAI] Server connected');
-    ws.send(JSON.stringify({ type: 'meeting_start' }));
+    ws.send(JSON.stringify({ type: 'meeting_start', participants: participants }));
     recording = true;
-    showStatus('Recording... (audio captured)');
+    showStatus('Recording... (' + (participants.length || 0) + ' participants)');
     recordChunk();
   };
 

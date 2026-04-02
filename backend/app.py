@@ -1297,6 +1297,7 @@ async def meeting_ws_endpoint(ws: WebSocket):
     meeting_start_time = 0
     meeting_active = False
     meeting_saved = False  # Prevent duplicate saves
+    meeting_participants = []  # Names from Google Meet DOM
 
     # Get user keys for ALL providers
     user_keys = {}
@@ -1329,9 +1330,16 @@ async def meeting_ws_endpoint(ws: WebSocket):
             # Fallback to chunk-by-chunk transcripts
             transcript = "\n".join(meeting_transcript_chunks) if meeting_transcript_chunks else "(No speech detected)"
 
-        # Replace "Speaker 0" with the recording user's name (they're always Speaker 0 via mic)
-        if user_name and user_name != "Unknown":
-            transcript = transcript.replace("[Speaker 0]", f"[{user_name}]")
+        # Replace speaker numbers with actual participant names
+        # Build name mapping: recording user is usually Speaker 0 (mic)
+        all_names = [user_name] if user_name and user_name != "Unknown" else []
+        for p in meeting_participants:
+            if p not in all_names:
+                all_names.append(p)
+
+        for i, name in enumerate(all_names):
+            transcript = transcript.replace(f"[Speaker {i}]", f"[{name}]")
+        logger.info(f"Speaker mapping: {dict(enumerate(all_names))}")
 
         mid = await create_meeting(user_id, "Meeting Recording", transcript, duration)
         logger.info(f"Meeting saved: id={mid}, transcript={len(transcript)} chars")
@@ -1372,7 +1380,8 @@ async def meeting_ws_endpoint(ws: WebSocket):
                 meeting_start_time = asyncio.get_event_loop().time()
                 meeting_active = True
                 meeting_saved = False
-                logger.info(f"Meeting recording started by {user_name}")
+                meeting_participants = msg.get("participants", [])
+                logger.info(f"Meeting recording started by {user_name}, participants: {meeting_participants}")
                 await ws.send_json({"type": "meeting_started"})
 
             elif msg.get("type") == "meeting_stop":
