@@ -20,8 +20,10 @@ async def transcribe_meeting(audio_bytes: bytes, user_keys: dict, whisper_model=
     # Try Deepgram first (best diarization)
     deepgram_key = user_keys.get("deepgram")
     if deepgram_key:
+        logger.info(f"Trying Deepgram ({len(audio_bytes)} bytes)...")
         result = await _transcribe_deepgram(audio_bytes, deepgram_key)
         if result:
+            logger.info("Transcribed with Deepgram (speaker diarization)")
             return result
 
     # Try Groq Whisper (fast, free)
@@ -51,7 +53,7 @@ async def _transcribe_deepgram(audio_bytes: bytes, api_key: str) -> str | None:
     """Transcribe with Deepgram — includes speaker diarization."""
     try:
         # Use Deepgram REST API directly (more reliable than SDK version changes)
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(
                 "https://api.deepgram.com/v1/listen",
                 params={
@@ -117,7 +119,7 @@ async def _transcribe_groq(audio_bytes: bytes, api_key: str) -> str | None:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             with open(tmp_path, "rb") as f:
                 resp = await client.post(
                     "https://api.groq.com/openai/v1/audio/transcriptions",
