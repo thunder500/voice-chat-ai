@@ -1692,15 +1692,71 @@
         try{
             const resp=await authFetch('/api/meetings/'+id);const m=await resp.json();
             const chatBox=document.getElementById('chatBox');
-            chatBox.innerHTML='<div style="padding:20px;max-width:700px;margin:0 auto">'+
-                '<h2 style="color:#8b5cf6;margin-bottom:4px">'+m.title+'</h2>'+
-                '<p style="color:var(--text5);font-size:12px;margin-bottom:16px">'+new Date(m.created_at).toLocaleString()+' · '+Math.floor((m.duration_seconds||0)/60)+' min · '+(m.model_used||'N/A')+'</p>'+
-                (m.summary?'<h3 style="margin-bottom:8px">Summary</h3><div style="margin-bottom:16px;line-height:1.6">'+m.summary+'</div>':'')+
-                ((m.action_items||[]).length?'<h3 style="margin-bottom:8px">Action Items</h3><ul style="margin-bottom:16px">'+m.action_items.map(a=>'<li>'+(typeof a==='string'?a:JSON.stringify(a))+'</li>').join('')+'</ul>':'')+
-                '<h3 style="margin-bottom:8px">Transcript</h3>'+
-                '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;line-height:1.6;max-height:400px;overflow-y:auto;white-space:pre-wrap">'+(m.transcript||'No transcript')+'</div>'+
+            const hasSummary=m.summary&&m.summary.trim();
+            const mins=Math.floor((m.duration_seconds||0)/60);
+            const actionHtml=(m.action_items||[]).map(a=>'<li style="margin-bottom:4px">'+(typeof a==='string'?a:JSON.stringify(a))+'</li>').join('');
+
+            chatBox.innerHTML=
+                '<div style="display:flex;gap:20px;padding:20px;height:calc(100vh - 180px);overflow:hidden">'+
+                    // Left: Transcript
+                    '<div style="flex:1;min-width:0;display:flex;flex-direction:column">'+
+                        '<h2 style="color:#8b5cf6;margin-bottom:4px">'+m.title+'</h2>'+
+                        '<p style="color:var(--text5);font-size:12px;margin-bottom:12px">'+new Date(m.created_at).toLocaleString()+' · '+mins+' min · '+(m.model_used||'N/A')+'</p>'+
+                        '<h3 style="margin-bottom:8px;font-size:14px">Transcript</h3>'+
+                        '<div style="flex:1;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;line-height:1.7;overflow-y:auto;white-space:pre-wrap">'+(m.transcript||'No transcript')+'</div>'+
+                    '</div>'+
+                    // Right: Summary
+                    '<div style="width:380px;flex-shrink:0;display:flex;flex-direction:column;gap:12px">'+
+                        '<div style="display:flex;align-items:center;justify-content:space-between">'+
+                            '<h3 style="color:#8b5cf6;font-size:14px;margin:0">Summary</h3>'+
+                            (!hasSummary?
+                                '<div style="display:flex;gap:6px;align-items:center">'+
+                                    '<select id="meetingSumModel" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:11px">'+
+                                        document.getElementById('modelSelect').innerHTML+
+                                    '</select>'+
+                                    '<button onclick="generateSummaryForMeeting('+m.id+')" style="background:#8b5cf6;color:white;border:none;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap">Generate</button>'+
+                                '</div>'
+                            :'')+
+                        '</div>'+
+                        '<div id="meetingSummaryArea" style="flex:1;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:16px;overflow-y:auto;font-size:13px;line-height:1.6">'+
+                            (hasSummary?
+                                '<div style="margin-bottom:16px">'+m.summary+'</div>'+
+                                (actionHtml?'<h4 style="color:#8b5cf6;margin-bottom:8px;font-size:13px">Action Items</h4><ul style="margin:0 0 0 16px">'+actionHtml+'</ul>':'')
+                            :
+                                '<p style="color:var(--text6);font-style:italic">No summary yet. Click Generate to create one.</p>'
+                            )+
+                        '</div>'+
+                    '</div>'+
                 '</div>';
-        }catch(e){}
+        }catch(e){console.error('viewMeeting error:',e)}
+    }
+
+    async function generateSummaryForMeeting(id){
+        const model=document.getElementById('meetingSumModel').value;
+        const area=document.getElementById('meetingSummaryArea');
+        area.innerHTML='<p style="color:#8b5cf6">Generating summary...</p>';
+        try{
+            const resp=await authFetch('/api/meetings/'+id+'/summarize',{
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({model:model})
+            });
+            const data=await resp.json();
+            if(data.error){
+                area.innerHTML='<p style="color:#ef4444">'+data.error+'</p>';
+                return;
+            }
+            const actionHtml=(data.action_items||[]).map(a=>'<li style="margin-bottom:4px">'+(typeof a==='string'?a:JSON.stringify(a))+'</li>').join('');
+            area.innerHTML=
+                '<h4 style="margin-bottom:8px;font-size:13px">'+data.title+'</h4>'+
+                '<ul style="margin:0 0 16px 16px">'+data.summary.map(s=>'<li style="margin-bottom:4px">'+s+'</li>').join('')+'</ul>'+
+                (actionHtml?'<h4 style="color:#8b5cf6;margin-bottom:8px;font-size:13px">Action Items</h4><ul style="margin:0 0 0 16px">'+actionHtml+'</ul>':'')+
+                '<p style="color:var(--text6);font-size:11px;margin-top:12px">Generated with '+model+'</p>';
+            // Refresh meeting list title
+            loadMeetings();
+        }catch(e){
+            area.innerHTML='<p style="color:#ef4444">Failed: '+e.message+'</p>';
+        }
     }
 
     // Initialize: check auth first, data loads after auth succeeds
