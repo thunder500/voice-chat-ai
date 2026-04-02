@@ -1343,6 +1343,22 @@ async def meeting_ws_endpoint(ws: WebSocket):
 
         mid = await create_meeting(user_id, "Meeting Recording", transcript, duration)
         logger.info(f"Meeting saved: id={mid}, transcript={len(transcript)} chars")
+
+        # Auto-generate summary
+        if transcript and transcript != "(No speech detected)" and len(transcript) > 20:
+            try:
+                # Pick best model: prefer OpenAI, fallback to Groq, then Ollama
+                summary_model = "gpt-4o-mini" if user_keys.get("openai") else \
+                                "llama-3.3-70b-versatile" if user_keys.get("groq") else \
+                                "llama3.2"
+                logger.info(f"Auto-generating summary with {summary_model}...")
+                result = await summarize_meeting(transcript, summary_model, user_keys)
+                await update_meeting_summary(mid, result["title"], "\n".join(result["summary"]),
+                                             result["action_items"], summary_model)
+                logger.info(f"Summary auto-generated: {result['title']}")
+            except Exception as e:
+                logger.error(f"Auto-summary failed: {e}")
+
         return mid
 
     try:
