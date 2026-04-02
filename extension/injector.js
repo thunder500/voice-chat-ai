@@ -111,22 +111,33 @@ async function startRecording() {
   // Scrape participant names from Google Meet DOM
   const participants = [];
   try {
-    // Google Meet shows participant names in various places
-    document.querySelectorAll('[data-participant-id] [data-self-name], [data-participant-id] .zWGUib, .KV1GEc, .cS7aqe, .ZjFb7c').forEach(el => {
-      const name = el.textContent.trim();
+    // Method 1: Get all visible name labels in the meeting
+    document.querySelectorAll('[data-self-name]').forEach(el => {
+      const name = el.getAttribute('data-self-name');
       if (name && name.length > 1 && !participants.includes(name)) participants.push(name);
     });
-    // Also try the bottom bar names
-    document.querySelectorAll('.dwSJ2e, .gMhkke').forEach(el => {
+    // Method 2: Name shown below video tiles
+    document.querySelectorAll('.XEazBc .cS7aqe, .XEazBc .ZjFb7c, .gMhkke, .dwSJ2e').forEach(el => {
       const name = el.textContent.trim();
-      if (name && name.length > 1 && name !== 'You' && !participants.includes(name)) participants.push(name);
+      if (name && name.length > 1 && name !== 'You' && name !== '(You)' && !participants.includes(name)) participants.push(name);
     });
-    // Fallback: get from title or any visible name elements
+    // Method 3: Search all elements with aria-label containing name patterns
+    document.querySelectorAll('[aria-label*="Turn off"], [aria-label*="presenting"]').forEach(el => {
+      const label = el.getAttribute('aria-label') || '';
+      // Extract name from "Turn off microphone for Ralph Benitez" etc.
+      const match = label.match(/for (.+?)$/);
+      if (match && match[1] && !participants.includes(match[1])) participants.push(match[1]);
+    });
+    // Method 4: Title bar participant names (bottom of video)
+    document.querySelectorAll('.KV1GEc, .cS7aqe').forEach(el => {
+      const name = el.textContent.trim().replace(' (You)', '').replace('(You)', '');
+      if (name && name.length > 1 && !participants.includes(name)) participants.push(name);
+    });
+    // Method 5: Get from the page title "Meet - xxx | Google Meet"
     if (participants.length === 0) {
-      document.querySelectorAll('[data-self-name]').forEach(el => {
-        const name = el.getAttribute('data-self-name');
-        if (name && !participants.includes(name)) participants.push(name);
-      });
+      const title = document.title || '';
+      const m = title.match(/^(.+?)\s*\|/);
+      if (m && m[1] && m[1] !== 'Meet') participants.push(m[1].trim());
     }
     console.log('[VoiceChatAI] Participants found:', participants);
   } catch(e) {
