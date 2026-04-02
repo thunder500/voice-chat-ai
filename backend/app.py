@@ -1296,6 +1296,7 @@ async def meeting_ws_endpoint(ws: WebSocket):
     meeting_audio_chunks = []  # Store raw audio for full transcription later
     meeting_start_time = 0
     meeting_active = False
+    meeting_saved = False  # Prevent duplicate saves
 
     # Get user keys for ALL providers
     user_keys = {}
@@ -1304,12 +1305,19 @@ async def meeting_ws_endpoint(ws: WebSocket):
         if k:
             user_keys[prov] = k
 
-    logger.info(f"Meeting extension connected for user {user_id}")
+    # Get user name for speaker labeling
+    user_info = await get_user_by_id(user_id)
+    user_name = user_info.get("name", "Unknown") if user_info else "Unknown"
+    user_email = user_info.get("email", "") if user_info else ""
+
+    logger.info(f"Meeting extension connected: {user_name} ({user_email})")
 
     async def save_meeting_from_audio():
+        nonlocal meeting_saved
         """Combine audio chunks and transcribe with best provider."""
-        if not meeting_audio_chunks:
+        if not meeting_audio_chunks or meeting_saved:
             return
+        meeting_saved = True
         duration = int(asyncio.get_event_loop().time() - meeting_start_time) if meeting_start_time else 0
         combined_audio = b"".join(meeting_audio_chunks)
         logger.info(f"Processing meeting: {len(meeting_audio_chunks)} chunks, {len(combined_audio)} bytes, {duration}s")
@@ -1320,6 +1328,10 @@ async def meeting_ws_endpoint(ws: WebSocket):
         if not transcript or transcript == "(No transcription available)":
             # Fallback to chunk-by-chunk transcripts
             transcript = "\n".join(meeting_transcript_chunks) if meeting_transcript_chunks else "(No speech detected)"
+
+        # Replace "Speaker 0" with the recording user's name (they're always Speaker 0 via mic)
+        if user_name and user_name != "Unknown":
+            transcript = transcript.replace("[Speaker 0]", f"[{user_name}]")
 
         mid = await create_meeting(user_id, "Meeting Recording", transcript, duration)
         logger.info(f"Meeting saved: id={mid}, transcript={len(transcript)} chars")
@@ -1359,7 +1371,8 @@ async def meeting_ws_endpoint(ws: WebSocket):
                 meeting_audio_chunks = []
                 meeting_start_time = asyncio.get_event_loop().time()
                 meeting_active = True
-                logger.info("Meeting extension: recording started")
+                meeting_saved = False
+                logger.info(f"Meeting recording started by {user_name}")
                 await ws.send_json({"type": "meeting_started"})
 
             elif msg.get("type") == "meeting_stop":
