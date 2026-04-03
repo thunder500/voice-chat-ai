@@ -1131,8 +1131,12 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
         await ws.send_json({"type": "stream_end"})
         await ws.send_json({"type": "tts_done"})
     except Exception as e:
-        logger.error(f"OpenAI stream error: {e}")
-        await ws.send_json({"type": "error", "message": str(e)})
+        if "ASGI" not in str(e) and "disconnect" not in str(e).lower():
+            logger.error(f"OpenAI stream error: {e}")
+        try:
+            await ws.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
 
     return full_response.strip()
 
@@ -1487,6 +1491,17 @@ async def meeting_ws_endpoint(ws: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
+    ws_open = True
+
+    async def safe_send(data):
+        """Send JSON to WebSocket, silently ignore if closed."""
+        if not ws_open:
+            return
+        try:
+            await ws.send_json(data)
+        except Exception:
+            pass
+
     user_id = await get_user_id_from_ws(ws)
     if not user_id:
         await ws.send_json({"type": "error", "message": "Not authenticated"})
@@ -2074,9 +2089,10 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
-        if "disconnect" in str(e).lower() or "receive" in str(e).lower():
+        if "disconnect" in str(e).lower() or "receive" in str(e).lower() or "ASGI" in str(e):
             logger.info("Client disconnected (unclean)")
         else:
             logger.error(f"WebSocket error: {e}")
     finally:
+        ws_open = False
         await close_realtime()
