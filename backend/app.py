@@ -157,7 +157,22 @@ async def warmup_ollama():
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
+async def landing():
+    with open("/app/templates/landing.html", "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/app", response_class=HTMLResponse)
+async def app_page():
+    with open("/app/templates/index.html", "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    with open("/app/templates/index.html", "r") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page():
     with open("/app/templates/index.html", "r") as f:
         return HTMLResponse(content=f.read())
 

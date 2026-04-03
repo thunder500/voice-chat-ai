@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chat AI - Real-Time Voice Assistant & Meeting Recorder</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0a0a0f;
+            --bg-elev: #0d0d14;
+            --surface: #1a1a2e;
+            --surface-hover: #1f1f35;
+            --border: #2a2a3e;
+            --primary: #8b5cf6;
+            --secondary: #6d28d9;
+            --accent: #a78bfa;
+            --accent-dim: rgba(167, 139, 250, .15);
+            --text: #e0e0e0;
+            --text-dim: #9ca3af;
+            --text-muted: #6b7280;
+            --glow-purple: rgba(139, 92, 246, .35);
+            --glow-indigo: rgba(99, 102, 241, .25);
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ---- NAV ---- */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 40px;
+            background: rgba(10, 10, 15, .75);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(139, 92, 246, .08);
+            transition: background .3s;
+        }
+        .nav-logo {
+            font-size: 18px; font-weight: 700;
+            background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -.3px;
+        }
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links a {
+            color: var(--text-dim); text-decoration: none; font-size: 14px;
+            transition: color .25s;
+        }
+        .nav-links a:hover { color: #fff; }
+        .nav-cta {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 20px; border-radius: 8px;
+            background: var(--primary); color: #fff;
+            font-size: 14px; font-weight: 600; text-decoration: none;
+            transition: all .25s;
+        }
+        .nav-cta:hover { background: #7c4fe0; transform: translateY(-1px); box-shadow: 0 4px 20px var(--glow-purple); }
+
+        /* ---- HERO ---- */
+        .hero {
+            position: relative; min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 120px 24px 80px;
+            overflow: hidden;
+        }
+
+        /* Ambient gradients */
+        .hero::before {
+            content: ''; position: absolute; top: -20%; right: -15%; width: 700px; height: 700px;
+            background: radial-gradient(circle, rgba(139,92,246,.12) 0%, transparent 65%);
+            pointer-events: none;
+        }
+        .hero::after {
+            content: ''; position: absolute; bottom: -10%; left: -10%; width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(99,102,241,.08) 0%, transparent 60%);
+            pointer-events: none;
+        }
+
+        /* ---- ORB ---- */
+        .orb-wrap {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -55%);
+            width: 420px; height: 420px; pointer-events: none; z-index: 0;
+        }
+        .orb {
+            width: 100%; height: 100%; border-radius: 50%; position: relative;
+            background: radial-gradient(circle at 35% 35%,
+                rgba(167,139,250,.22) 0%,
+                rgba(139,92,246,.14) 25%,
+                rgba(109,40,217,.08) 50%,
+                transparent 70%
+            );
+            animation: orbFloat 8s ease-in-out infinite;
+        }
+        .orb::before {
+            content: ''; position: absolute; inset: -8px; border-radius: 50%;
+            background: conic-gradient(
+                from 0deg,
+                transparent 0%,
+                rgba(139,92,246,.18) 15%,
+                transparent 30%,
+                rgba(167,139,250,.12) 50%,
+                transparent 65%,
+                rgba(99,102,241,.15) 80%,
+                transparent 100%
+            );
+            animation: orbSpin 12s linear infinite;
+            filter: blur(20px);
+        }
+        .orb::after {
+            content: ''; position: absolute; inset: 40px; border-radius: 50%;
+            background: radial-gradient(circle at 40% 40%,
+                rgba(167,139,250,.30) 0%,
+                rgba(139,92,246,.15) 30%,
+                transparent 65%
+            );
+            animation: orbPulse 4s ease-in-out infinite;
+            filter: blur(12px);
+        }
+        /* Ring around orb */
+        .orb-ring {
+            position: absolute; inset: -30px; border-radius: 50%;
+            border: 1px solid rgba(139,92,246,.08);
+            animation: orbSpin 20s linear infinite reverse;
+        }
+        .orb-ring::before {
+            content: ''; position: absolute; top: -3px; left: 50%;
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 12px var(--primary);
+        }
+        /* Particles */
+        .orb-particles {
+            position: absolute; inset: -60px;
+        }
+        .orb-particles span {
+            position: absolute; width: 3px; height: 3px; border-radius: 50%;
+            background: var(--accent); opacity: 0;
+        }
+        .orb-particles span:nth-child(1) { top: 10%; left: 20%; animation: particleDrift 6s 0s infinite; }
+        .orb-particles span:nth-child(2) { top: 80%; left: 75%; animation: particleDrift 7s 1s infinite; }
+        .orb-particles span:nth-child(3) { top: 30%; left: 85%; animation: particleDrift 5s 2s infinite; }
+        .orb-particles span:nth-child(4) { top: 70%; left: 15%; animation: particleDrift 8s 0.5s infinite; }
+        .orb-particles span:nth-child(5) { top: 50%; left: 50%; animation: particleDrift 6s 3s infinite; }
+        .orb-particles span:nth-child(6) { top: 15%; left: 60%; animation: particleDrift 7s 1.5s infinite; }
+
+        @keyframes orbFloat {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-18px) scale(1.03); }
+        }
+        @keyframes orbSpin { to { transform: rotate(360deg); } }
+        @keyframes orbPulse {
+            0%, 100% { opacity: .6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.08); }
+        }
+        @keyframes particleDrift {
+            0% { opacity: 0; transform: translate(0, 0) scale(.5); }
+            20% { opacity: .7; }
+            80% { opacity: .4; }
+            100% { opacity: 0; transform: translate(20px, -40px) scale(1.2); }
+        }
+
+        .hero-content { position: relative; z-index: 2; max-width: 720px; }
+
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 16px; border-radius: 20px;
+            background: var(--accent-dim); border: 1px solid rgba(139,92,246,.2);
+            font-size: 13px; color: var(--accent); font-weight: 500;
+            margin-bottom: 28px;
+            animation: fadeUp .8s ease-out both;
+        }
+        .hero-badge-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 8px rgba(74, 222, 128, .5);
+            animation: dotPulse 2s infinite;
+        }
+        @keyframes dotPulse {
+            0%, 100% { opacity: 1; } 50% { opacity: .5; }
+        }
+
+        h1 {
+            font-size: clamp(40px, 6vw, 68px);
+            font-weight: 800; line-height: 1.08; letter-spacing: -1.5px;
+            margin-bottom: 20px;
+            animation: fadeUp .8s .15s ease-out both;
+        }
+        h1 .gradient-text {
+            background: linear-gradient(135deg, #c4b5fd 0%, #8b5cf6 40%, #6d28d9 70%, #7c3aed 100%);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-sub {
+            font-size: clamp(16px, 2vw, 20px); color: var(--text-dim);
+            max-width: 560px; margin: 0 auto 36px; line-height: 1.6;
+            animation: fadeUp .8s .3s ease-out both;
+        }
+
+        .hero-actions {
+            display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+            animation: fadeUp .8s .45s ease-out both;
+        }
+
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 14px 32px; border-radius: 12px;
+            font-size: 15px; font-weight: 600; text-decoration: none;
+            transition: all .3s; cursor: pointer; border: none;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+            color: #fff; box-shadow: 0 4px 24px rgba(139,92,246,.3);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(139,92,246,.45);
+        }
+        .btn-ghost {
+            background: rgba(139,92,246,.08); color: var(--accent);
+            border: 1px solid rgba(139,92,246,.2);
+        }
+        .btn-ghost:hover {
+            background: rgba(139,92,246,.15); transform: translateY(-2px);
+            border-color: rgba(139,92,246,.35);
+        }
+
+        .hero-stats {
+            display: flex; gap: 48px; justify-content: center;
+            margin-top: 56px; animation: fadeUp .8s .6s ease-out both;
+        }
+        .hero-stat { text-align: center; }
+        .hero-stat-val {
+            font-size: 28px; font-weight: 700;
+            background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ---- SECTION COMMON ---- */
+        section { padding: 100px 24px; position: relative; }
+        .section-inner { max-width: 1100px; margin: 0 auto; }
+        .section-label {
+            display: inline-block; font-size: 12px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 2px; color: var(--primary);
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: clamp(28px, 4vw, 42px); font-weight: 800;
+            letter-spacing: -.8px; margin-bottom: 16px; color: #fff;
+        }
+        .section-desc {
+            font-size: 17px; color: var(--text-dim); max-width: 560px; line-height: 1.7;
+        }
+        .section-header { text-align: center; margin-bottom: 64px; }
+        .section-header .section-desc { margin: 0 auto; }
+
+        /* ---- FEATURES ---- */
+        .features-section { background: linear-gradient(180deg, var(--bg) 0%, #0c0c14 100%); }
+        .features-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .feature-card {
+            padding: 32px 28px; border-radius: 16px;
+            background: linear-gradient(145deg, rgba(26,26,46,.6), rgba(13,13,20,.8));
+            border: 1px solid rgba(139,92,246,.08);
+            transition: all .35s;
+            opacity: 0; transform: translateY(30px);
+        }
+        .feature-card.visible {
+            opacity: 1; transform: translateY(0);
+        }
+        .feature-card:hover {
+            border-color: rgba(139,92,246,.25);
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(139,92,246,.1);
+        }
+        .feature-icon {
+            width: 52px; height: 52px; border-radius: 14px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; margin-bottom: 20px;
+            background: var(--accent-dim);
+        }
+        .feature-card h3 {
+            font-size: 18px; font-weight: 700; color: #fff;
+            margin-bottom: 10px;
+        }
+        .feature-card p {
+            font-size: 14px; color: var(--text-dim); line-height: 1.65;
+        }
+
+        /* Divider */
+        .divider {
+            height: 1px; max-width: 1100px; margin: 0 auto;
+            background: linear-gradient(90deg, transparent, rgba(139,92,246,.15), transparent);
+        }
+
+        /* ---- HOW IT WORKS ---- */
+        .how-section { background: var(--bg); }
+        .steps {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 40px; position: relative;
+        }
+        /* Connector line */
+        .steps::before {
+            content: ''; position: absolute; top: 48px;
+            left: calc(16.67% + 24px); right: calc(16.67% + 24px);
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), var(--accent), var(--primary));
+            opacity: .2;
+        }
+        .step {
+            text-align: center; position: relative;
+            opacity: 0; transform: translateY(30px);
+        }
+        .step.visible { opacity: 1; transform: translateY(0); }
+        .step-num {
+            width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 24px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; font-weight: 800; color: #fff;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            box-shadow: 0 4px 20px var(--glow-purple);
+            position: relative; z-index: 2;
+        }
+        .step h3 {
+            font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 10px;
+        }
+        .step p {
+            font-size: 14px; color: var(--text-dim); line-height: 1.65;
+            max-width: 300px; margin: 0 auto;
+        }
+
+        /* ---- CTA BANNER ---- */
+        .cta-section {
+            padding: 80px 24px;
+            background: linear-gradient(180deg, var(--bg), #0c0c14);
+        }
+        .cta-box {
+            max-width: 700px; margin: 0 auto; text-align: center;
+            padding: 56px 40px; border-radius: 24px;
+            background: linear-gradient(145deg, rgba(139,92,246,.08), rgba(99,102,241,.04));
+            border: 1px solid rgba(139,92,246,.12);
+            position: relative; overflow: hidden;
+        }
+        .cta-box::before {
+            content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+            background: radial-gradient(circle at 50% 80%, rgba(139,92,246,.08) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        .cta-box h2 {
+            font-size: clamp(24px, 3.5vw, 36px); font-weight: 800;
+            color: #fff; margin-bottom: 14px; position: relative;
+        }
+        .cta-box p {
+            font-size: 16px; color: var(--text-dim); margin-bottom: 32px;
+            position: relative;
+        }
+        .cta-box .btn { position: relative; }
+
+        /* ---- FOOTER ---- */
+        footer {
+            padding: 48px 24px 32px;
+            border-top: 1px solid rgba(139,92,246,.06);
+            background: var(--bg);
+        }
+        .footer-inner {
+            max-width: 1100px; margin: 0 auto;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 20px;
+        }
+        .footer-brand {
+            font-size: 15px; font-weight: 700;
+            background: linear-gradient(135deg, #a78bfa, #8b5cf6);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .footer-links { display: flex; gap: 28px; flex-wrap: wrap; }
+        .footer-links a {
+            color: var(--text-muted); font-size: 13px; text-decoration: none;
+            transition: color .25s;
+        }
+        .footer-links a:hover { color: var(--accent); }
+        .footer-copy { font-size: 12px; color: var(--text-muted); }
+
+        /* ---- RESPONSIVE ---- */
+        @media (max-width: 768px) {
+            nav { padding: 14px 20px; }
+            .nav-links { gap: 16px; }
+            .nav-links a.hide-mobile { display: none; }
+            .hero { padding: 100px 20px 60px; }
+            .orb-wrap { width: 280px; height: 280px; }
+            .hero-stats { gap: 28px; }
+            .hero-stat-val { font-size: 22px; }
+            section { padding: 64px 20px; }
+            .steps::before { display: none; }
+            .cta-box { padding: 40px 24px; }
+        }
+        @media (max-width: 480px) {
+            .hero-actions { flex-direction: column; align-items: center; }
+            .btn { width: 100%; max-width: 280px; justify-content: center; }
+            .hero-stats { flex-direction: column; gap: 16px; }
+        }
+
+        /* ---- SCROLL ANIMATION ---- */
+        .reveal {
+            opacity: 0; transform: translateY(30px);
+            transition: opacity .7s ease-out, transform .7s ease-out;
+        }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <div class="nav-logo">Voice Chat AI</div>
+    <div class="nav-links">
+        <a href="#features" class="hide-mobile">Features</a>
+        <a href="#how-it-works" class="hide-mobile">How It Works</a>
+        <a href="/login">Sign In</a>
+        <a href="/register" class="nav-cta">Get Started</a>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="orb-wrap">
+        <div class="orb-ring"></div>
+        <div class="orb"></div>
+        <div class="orb-particles">
+            <span></span><span></span><span></span>
+            <span></span><span></span><span></span>
+        </div>
+    </div>
+
+    <div class="hero-content">
+        <div class="hero-badge">
+            <span class="hero-badge-dot"></span>
+            Self-Hosted &middot; Private &middot; Open Source
+        </div>
+
+        <h1><span class="gradient-text">Voice Chat AI</span></h1>
+        <p class="hero-sub">
+            Real-time voice assistant and meeting recorder powered by AI.
+            Transcribe, summarize, and chat &mdash; all on your own infrastructure.
+        </p>
+
+        <div class="hero-actions">
+            <a href="/register" class="btn btn-primary">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                Get Started
+            </a>
+            <a href="/login" class="btn btn-ghost">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+                Sign In
+            </a>
+        </div>
+
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <div class="hero-stat-val">50+</div>
+                <div class="hero-stat-label">Languages</div>
+            </div>
+            <div class="hero-stat">
+                <div class="hero-stat-val">&lt;500ms</div>
+                <div class="hero-stat-label">Latency</div>
+            </div>
+            <div class="hero-stat">
+                <div class="hero-stat-val">100%</div>
+                <div class="hero-stat-label">Private</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features-section" id="features">
+    <div class="section-inner">
+        <div class="section-header reveal">
+            <div class="section-label">Features</div>
+            <h2 class="section-title">Everything you need, nothing you don't</h2>
+            <p class="section-desc">
+                A complete voice AI platform that runs entirely on your hardware.
+                No data leaves your network.
+            </p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                </div>
+                <h3>Voice Chat</h3>
+                <p>Talk naturally with an AI assistant. Real-time speech-to-text and text-to-speech with sub-second response times and multiple voice options.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="2" fill="#a78bfa" opacity=".4"/></svg>
+                </div>
+                <h3>Meeting Recording</h3>
+                <p>Record Google Meet sessions with automatic speaker identification, real-time transcription, and AI-generated meeting summaries.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10A15.3 15.3 0 0112 2z"/></svg>
+                </div>
+                <h3>Multi-Language</h3>
+                <p>Speak and transcribe in over 50 languages. Automatic language detection and seamless switching between languages in real-time.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg>
+                </div>
+                <h3>Knowledge Base</h3>
+                <p>Upload documents and build a private knowledge base. The AI references your files for accurate, context-aware answers using RAG.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- HOW IT WORKS -->
+<section class="how-section" id="how-it-works">
+    <div class="section-inner">
+        <div class="section-header reveal">
+            <div class="section-label">How It Works</div>
+            <h2 class="section-title">Up and running in minutes</h2>
+            <p class="section-desc">
+                Deploy on your own server and start talking. No cloud accounts needed.
+            </p>
+        </div>
+
+        <div class="steps">
+            <div class="step reveal">
+                <div class="step-num">1</div>
+                <h3>Deploy</h3>
+                <p>Clone the repo and run with Docker. Configure your preferred LLM, speech-to-text, and TTS providers.</p>
+            </div>
+            <div class="step reveal">
+                <div class="step-num">2</div>
+                <h3>Connect</h3>
+                <p>Open your browser, create an account, and start a voice chat or schedule a meeting recording.</p>
+            </div>
+            <div class="step reveal">
+                <div class="step-num">3</div>
+                <h3>Interact</h3>
+                <p>Chat by voice, record meetings, upload documents, and get AI-powered summaries and insights.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+    <div class="cta-box reveal">
+        <h2>Ready to take control of your AI?</h2>
+        <p>Self-hosted, private, and completely yours. Get started in under five minutes.</p>
+        <a href="/register" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Create Your Account
+        </a>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-inner">
+        <div class="footer-brand">Voice Chat AI</div>
+        <div class="footer-links">
+            <a href="#features">Features</a>
+            <a href="#how-it-works">How It Works</a>
+            <a href="/login">Sign In</a>
+            <a href="/register">Register</a>
+        </div>
+        <div class="footer-copy">&copy; 2026 Voice Chat AI. Self-hosted and open source.</div>
+    </div>
+</footer>
+
+<!-- SCROLL REVEAL -->
+<script>
+(function() {
+    var els = document.querySelectorAll('.reveal, .feature-card, .step');
+    if (!('IntersectionObserver' in window)) {
+        els.forEach(function(el) { el.classList.add('visible'); });
+        return;
+    }
+    var obs = new IntersectionObserver(function(entries) {
+        entries.forEach(function(e, i) {
+            if (e.isIntersecting) {
+                var delay = Array.from(els).indexOf(e.target) % 4;
+                e.target.style.transitionDelay = (delay * 0.1) + 's';
+                e.target.classList.add('visible');
+                obs.unobserve(e.target);
+            }
+        });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    els.forEach(function(el) { obs.observe(el); });
+})();
+</script>
+
+</body>
+</html>
