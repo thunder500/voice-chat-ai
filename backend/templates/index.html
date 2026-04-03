@@ -1346,7 +1346,7 @@
             const blob=b64toBlob(item.audio,'audio/mpeg');
             const url=URL.createObjectURL(blob);
             currentAudio=new Audio(url);
-            currentAudio.playbackRate=1.1;
+            currentAudio.playbackRate=1.0;
             currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextAudio()};
             currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextAudio()};
             currentAudio.play().catch(()=>playNextAudio());
