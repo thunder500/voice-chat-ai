@@ -1024,9 +1024,10 @@
         source.connect(ctx.destination);
 
         const now=ctx.currentTime;
-        const startTime=Math.max(now,realtimeNextPlayTime);
-        source.start(startTime);
-        realtimeNextPlayTime=startTime+buffer.duration;
+        // Add 50ms buffer to prevent gaps from network jitter
+        if(realtimeNextPlayTime < now) realtimeNextPlayTime = now + 0.05;
+        source.start(realtimeNextPlayTime);
+        realtimeNextPlayTime += buffer.duration;
     }
 
     function stopRealtimePlayback(){

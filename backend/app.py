@@ -1650,11 +1650,16 @@ async def websocket_endpoint(ws: WebSocket):
 
                 elif msg_type == "error":
                     err = msg.get("error", {})
-                    logger.error(f"Realtime API error: {err}")
-                    await ws.send_json({
-                        "type": "error",
-                        "message": f"Realtime API error: {err.get('message', str(err))}",
-                    })
+                    err_code = err.get("code", "")
+                    # Suppress harmless errors
+                    if err_code in ("response_cancel_not_active",):
+                        logger.debug(f"Realtime (ignored): {err_code}")
+                    else:
+                        logger.error(f"Realtime API error: {err}")
+                        await ws.send_json({
+                            "type": "error",
+                            "message": f"Realtime API error: {err.get('message', str(err))}",
+                        })
 
         except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"Realtime WebSocket closed: {e}")
