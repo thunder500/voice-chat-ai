@@ -941,6 +941,107 @@
     let audioCtx=null, analyser=null, micStream=null;
     let currentPersonaId=null, orbState='idle';
 
+    // ---- Realtime API state ----
+    let realtimeMode=false;
+    let realtimeProcessor=null;  // ScriptProcessorNode for PCM16 capture
+    let realtimePlayCtx=null;    // AudioContext for PCM16 playback
+    let realtimePlayQueue=[];    // Queue of Float32Array audio chunks to play
+    let realtimePlayingNode=null;
+    let realtimeNextPlayTime=0;
+
+    function isRealtimeModel(name){ return name && name.includes('realtime'); }
+
+    // Convert Float32 audio samples to base64 PCM16 (little-endian, mono)
+    function float32ToPcm16Base64(float32){
+        const pcm16=new Int16Array(float32.length);
+        for(let i=0;i<float32.length;i++){
+            let s=Math.max(-1,Math.min(1,float32[i]));
+            pcm16[i]=s<0?s*0x8000:s*0x7FFF;
+        }
+        const bytes=new Uint8Array(pcm16.buffer);
+        let binary='';
+        for(let i=0;i<bytes.length;i++) binary+=String.fromCharCode(bytes[i]);
+        return btoa(binary);
+    }
+
+    // Convert base64 PCM16 to Float32Array for AudioContext playback
+    function pcm16Base64ToFloat32(b64){
+        const binary=atob(b64);
+        const bytes=new Uint8Array(binary.length);
+        for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+        const pcm16=new Int16Array(bytes.buffer);
+        const float32=new Float32Array(pcm16.length);
+        for(let i=0;i<pcm16.length;i++) float32[i]=pcm16[i]/32768.0;
+        return float32;
+    }
+
+    // Start capturing mic audio as PCM16 24kHz and sending via WebSocket
+    function startRealtimeCapture(){
+        if(!micStream||!audioCtx) return;
+        // Create a separate AudioContext at 24kHz for capture
+        const captureCtx=new AudioContext({sampleRate:24000});
+        const src=captureCtx.createMediaStreamSource(micStream);
+        // ScriptProcessorNode: 4096 samples per buffer, mono
+        const processor=captureCtx.createScriptProcessor(4096,1,1);
+        processor.onaudioprocess=(e)=>{
+            if(!realtimeMode||!ws||ws.readyState!==1) return;
+            const input=e.inputBuffer.getChannelData(0);
+            const b64=float32ToPcm16Base64(input);
+            ws.send(JSON.stringify({type:'realtime_audio',audio:b64}));
+        };
+        src.connect(processor);
+        // Connect to a muted gain node (not destination) to avoid echo
+        const muteNode=captureCtx.createGain();
+        muteNode.gain.value=0;
+        processor.connect(muteNode);
+        muteNode.connect(captureCtx.destination);
+        realtimeProcessor={processor,captureCtx,src,muteNode};
+    }
+
+    function stopRealtimeCapture(){
+        if(realtimeProcessor){
+            try{realtimeProcessor.processor.disconnect()}catch(e){}
+            try{realtimeProcessor.src.disconnect()}catch(e){}
+            if(realtimeProcessor.muteNode) try{realtimeProcessor.muteNode.disconnect()}catch(e){}
+            try{realtimeProcessor.captureCtx.close()}catch(e){}
+            realtimeProcessor=null;
+        }
+    }
+
+    // Play PCM16 24kHz audio chunks seamlessly using AudioContext
+    function initRealtimePlayback(){
+        realtimePlayCtx=new AudioContext({sampleRate:24000});
+        realtimeNextPlayTime=0;
+    }
+
+    function playRealtimeAudioChunk(float32Data){
+        if(!realtimePlayCtx) initRealtimePlayback();
+        const ctx=realtimePlayCtx;
+        const buffer=ctx.createBuffer(1,float32Data.length,24000);
+        buffer.getChannelData(0).set(float32Data);
+        const source=ctx.createBufferSource();
+        source.buffer=buffer;
+        source.connect(ctx.destination);
+
+        const now=ctx.currentTime;
+        const startTime=Math.max(now,realtimeNextPlayTime);
+        source.start(startTime);
+        realtimeNextPlayTime=startTime+buffer.duration;
+    }
+
+    function stopRealtimePlayback(){
+        realtimeNextPlayTime=0;
+        if(realtimePlayCtx){
+            try{realtimePlayCtx.close()}catch(e){}
+            realtimePlayCtx=null;
+        }
+    }
+
+    function interruptRealtimePlayback(){
+        // Reset playback schedule so next audio starts immediately
+        stopRealtimePlayback();
+    }
+
     const orbBtn=document.getElementById('orbBtn'), chatBox=document.getElementById('chatBox');
     const hint=document.getElementById('hint'), connBadge=document.getElementById('connBadge');
     const permOverlay=document.getElementById('permOverlay');
@@ -979,7 +1080,34 @@
             else if(m.type==='error'){showStatus(m.message);if(isActive)resumeListen()}
             else if(m.type==='conversation_id'){convId=m.id;loadConvList()}
             else if(m.type==='ready')resumeListen();
-            else if(m.type==='model_changed'){}
+            else if(m.type==='model_changed'){
+                // Check if we switched to/from realtime mode
+                const wasRealtime=realtimeMode;
+                realtimeMode=isRealtimeModel(m.model);
+                if(wasRealtime&&!realtimeMode){stopRealtimeCapture();stopRealtimePlayback()}
+            }
+            else if(m.type==='realtime_started'){
+                realtimeMode=true;
+                setOrb('ai-speaking');hint.textContent='AI is greeting you...';
+                startRealtimeCapture();
+            }
+            else if(m.type==='realtime_audio_delta'){
+                // Play PCM16 audio chunk from OpenAI Realtime API
+                isAiSpeaking=true;setOrb('ai-speaking');hint.textContent='AI speaking...';
+                const float32=pcm16Base64ToFloat32(m.audio);
+                playRealtimeAudioChunk(float32);
+            }
+            else if(m.type==='realtime_audio_done'){
+                // AI finished speaking this response
+                isAiSpeaking=false;
+                endStreamMsg();
+                if(isActive&&!isMuted){setOrb('listening');hint.textContent='Listening... just talk'}
+            }
+            else if(m.type==='realtime_user_speaking'){
+                // User started speaking — interrupt AI playback
+                interruptRealtimePlayback();
+                isAiSpeaking=false;setOrb('user-speaking');hint.textContent='You\'re speaking...';
+            }
             else if(m.type==='persona_changed'){document.getElementById('personaLabel').textContent=m.name}
             else if(m.type==='title_updated'){loadConvList()}
             else if(m.type==='meeting_transcript') handleMeetingTranscript(m);
@@ -1229,6 +1357,9 @@
 
     // ---- Conversation ----
     function interruptAi(){
+        if(realtimeMode){
+            interruptRealtimePlayback();
+        }
         if(currentAudio){currentAudio.pause();currentAudio=null}
         speechSynthesis.cancel();audioQueue=[];speechQueue=[];isAiSpeaking=false;isSpeechPlaying=false;allChunksDone=false;
         // Tell backend to cancel the LLM stream too
@@ -1241,6 +1372,9 @@
         hint.textContent='Starting...';
         try{await initAudio()}catch(e){hint.textContent='Mic error: '+e.message;return}
         isActive=true;
+        // Check if selected model is realtime
+        const selModel=document.getElementById('modelSelect').value;
+        realtimeMode=isRealtimeModel(selModel);
         orbBtn.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" width="28" height="28"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>';
         const mb=document.getElementById('muteBtn');
         mb.style.display='inline-block';mb.innerHTML='&#128263; Mute';mb.classList.remove('muted');
@@ -1249,7 +1383,9 @@
     }
 
     function stopConvo(){
-        isActive=false;isMuted=false;stopListen();interruptAi();
+        isActive=false;isMuted=false;
+        if(realtimeMode){stopRealtimeCapture();stopRealtimePlayback();realtimeMode=false}
+        stopListen();interruptAi();
         if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}
         if(audioCtx){audioCtx.close();audioCtx=null;analyser=null}
         setOrb('idle');hint.textContent='Click orb or press Space';hint.classList.remove('on');
@@ -1264,12 +1400,12 @@
         isMuted=!isMuted;
         const btn=document.getElementById('muteBtn');
         if(isMuted){
-            stopListen();
+            if(realtimeMode) stopRealtimeCapture(); else stopListen();
             btn.innerHTML='&#127908; Unmute';btn.classList.add('muted');
             hint.textContent='Muted — click Unmute or press M';
             setOrb('idle');
         }else{
-            startListen();
+            if(realtimeMode) startRealtimeCapture(); else startListen();
             btn.innerHTML='&#128263; Mute';btn.classList.remove('muted');
             hint.textContent='Listening... just talk';
             setOrb('listening');
@@ -1281,6 +1417,11 @@
         if(!isActive)return;
         isAiSpeaking=false;
         if(isMuted){setOrb('idle');hint.textContent='Muted — click Unmute or press M';return}
+        if(realtimeMode){
+            // In realtime mode, server handles VAD — just update UI
+            setOrb('listening');hint.textContent='Listening... just talk';
+            return;
+        }
         startListen();setOrb('listening');hint.textContent='Listening... just talk';
 
         // Auto-continue: if user says nothing for 6 seconds, tell AI to keep going

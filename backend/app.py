@@ -8,6 +8,7 @@ import logging
 import base64
 import edge_tts
 import httpx
+import websockets
 from openai import AsyncOpenAI
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -637,6 +638,7 @@ async def list_models(request: Request):
         models.extend([
             {"name": "gpt-4o-mini", "size": 0, "provider": "openai"},
             {"name": "gpt-4o", "size": 0, "provider": "openai"},
+            {"name": "gpt-4o-realtime-preview", "size": 0, "provider": "openai"},
             {"name": "gpt-3.5-turbo", "size": 0, "provider": "openai"},
         ])
 
@@ -1509,6 +1511,162 @@ async def websocket_endpoint(ws: WebSocket):
     meeting_bot_stop = None
     meeting_bot_task = None
 
+    # ---- Realtime API state ----
+    realtime_ws = None  # WebSocket connection to OpenAI Realtime API
+    realtime_listener_task = None  # Task that listens for OpenAI responses
+    realtime_mode = False  # True when using a realtime model
+
+    def is_realtime_model(model_name: str) -> bool:
+        return "realtime" in model_name
+
+    async def close_realtime():
+        """Close the OpenAI Realtime WebSocket and listener task."""
+        nonlocal realtime_ws, realtime_listener_task, realtime_mode
+        realtime_mode = False
+        if realtime_listener_task and not realtime_listener_task.done():
+            realtime_listener_task.cancel()
+            try:
+                await realtime_listener_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        realtime_listener_task = None
+        if realtime_ws:
+            try:
+                await realtime_ws.close()
+            except Exception:
+                pass
+        realtime_ws = None
+
+    async def open_realtime(model: str, api_key: str):
+        """Open a WebSocket to the OpenAI Realtime API and start listening."""
+        nonlocal realtime_ws, realtime_listener_task, realtime_mode
+        await close_realtime()
+
+        url = f"wss://api.openai.com/v1/realtime?model={model}"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "OpenAI-Beta": "realtime=v1",
+        }
+        logger.info(f"Connecting to OpenAI Realtime API: {model}")
+        realtime_ws = await websockets.connect(url, additional_headers=headers, max_size=None)
+        realtime_mode = True
+
+        # Send session.update with persona/instructions and turn detection
+        session_update = {
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "instructions": current_persona_prompt,
+                "voice": "alloy",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "input_audio_transcription": {"model": "whisper-1"},
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500,
+                },
+            },
+        }
+        await realtime_ws.send(json.dumps(session_update))
+        logger.info("Sent session.update to Realtime API")
+
+        # Start background listener
+        realtime_listener_task = asyncio.create_task(_realtime_listener())
+
+    async def _realtime_listener():
+        """Listen for messages from OpenAI Realtime API and forward to browser."""
+        nonlocal realtime_ws, conversation_id
+        try:
+            async for raw in realtime_ws:
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = msg.get("type", "")
+
+                if msg_type == "session.created":
+                    logger.info("Realtime session created")
+
+                elif msg_type == "session.updated":
+                    logger.info("Realtime session updated")
+
+                elif msg_type == "response.audio.delta":
+                    # Forward audio chunk to browser
+                    audio_b64 = msg.get("delta", "")
+                    if audio_b64:
+                        await ws.send_json({
+                            "type": "realtime_audio_delta",
+                            "audio": audio_b64,
+                        })
+
+                elif msg_type == "response.audio_transcript.delta":
+                    # Forward transcript text to browser
+                    delta_text = msg.get("delta", "")
+                    if delta_text:
+                        await ws.send_json({
+                            "type": "text_delta",
+                            "delta": delta_text,
+                        })
+
+                elif msg_type == "response.audio_transcript.done":
+                    transcript = msg.get("transcript", "")
+                    if transcript and conversation_id:
+                        await add_message(conversation_id, "assistant", transcript)
+                        chat_history.append({"role": "assistant", "content": transcript})
+
+                elif msg_type == "response.audio.done":
+                    # Audio stream finished
+                    await ws.send_json({"type": "realtime_audio_done"})
+
+                elif msg_type == "response.done":
+                    logger.info("Realtime response complete")
+
+                elif msg_type == "input_audio_buffer.speech_started":
+                    # User started speaking — tell browser to interrupt playback
+                    logger.info("Realtime: user speech started (VAD)")
+                    await ws.send_json({"type": "realtime_user_speaking"})
+
+                elif msg_type == "input_audio_buffer.speech_stopped":
+                    logger.info("Realtime: user speech stopped (VAD)")
+
+                elif msg_type == "conversation.item.input_audio_transcription.completed":
+                    user_transcript = msg.get("transcript", "")
+                    if user_transcript:
+                        await ws.send_json({
+                            "type": "transcript",
+                            "role": "user",
+                            "content": user_transcript,
+                        })
+                        if conversation_id:
+                            await add_message(conversation_id, "user", user_transcript)
+                            chat_history.append({"role": "user", "content": user_transcript})
+
+                elif msg_type == "response.created":
+                    # A new response is starting — tell browser to start stream
+                    await ws.send_json({"type": "stream_start"})
+
+                elif msg_type == "error":
+                    err = msg.get("error", {})
+                    logger.error(f"Realtime API error: {err}")
+                    await ws.send_json({
+                        "type": "error",
+                        "message": f"Realtime API error: {err.get('message', str(err))}",
+                    })
+
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"Realtime WebSocket closed: {e}")
+        except asyncio.CancelledError:
+            logger.info("Realtime listener cancelled")
+        except Exception as e:
+            logger.error(f"Realtime listener error: {e}")
+            try:
+                await ws.send_json({"type": "error", "message": f"Realtime connection error: {str(e)}"})
+            except Exception:
+                pass
+
     async def cancel_llm():
         """Cancel any running LLM stream and clean up chat history."""
         nonlocal llm_task
@@ -1563,16 +1721,39 @@ async def websocket_endpoint(ws: WebSocket):
                     logger.info("Sending AI greeting...")
                     conversation_id = await create_conversation(user_id, "New conversation")
                     await ws.send_json({"type": "conversation_id", "id": conversation_id})
-                    await add_message(conversation_id, "assistant", GREETING_TEXT)
-                    chat_history.append({"role": "assistant", "content": GREETING_TEXT})
-                    # Show greeting text in chat
-                    await ws.send_json({"type": "stream_start"})
-                    await ws.send_json({"type": "text_delta", "delta": GREETING_TEXT})
-                    await ws.send_json({"type": "stream_end"})
-                    # Greeting TTS
-                    await _send_tts(ws, GREETING_TEXT, current_voice, user_openai_client)
-                    await ws.send_json({"type": "tts_done"})
-                    continue
+
+                    if is_realtime_model(current_model):
+                        # Realtime mode: open connection to OpenAI Realtime API
+                        api_key = user_keys.get("openai") or OPENAI_API_KEY
+                        if not api_key:
+                            await ws.send_json({"type": "error", "message": "OpenAI API key required for realtime model"})
+                            continue
+                        try:
+                            await open_realtime(current_model, api_key)
+                            await ws.send_json({"type": "realtime_started"})
+                            # Let the AI greet via realtime — send a response.create
+                            await realtime_ws.send(json.dumps({
+                                "type": "response.create",
+                                "response": {
+                                    "modalities": ["text", "audio"],
+                                    "instructions": "Greet the user briefly. Say something like: Hey! Great to hear from you. What's on your mind?",
+                                },
+                            }))
+                        except Exception as e:
+                            logger.error(f"Failed to open realtime: {e}")
+                            await ws.send_json({"type": "error", "message": f"Realtime connection failed: {str(e)}"})
+                        continue
+                    else:
+                        await add_message(conversation_id, "assistant", GREETING_TEXT)
+                        chat_history.append({"role": "assistant", "content": GREETING_TEXT})
+                        # Show greeting text in chat
+                        await ws.send_json({"type": "stream_start"})
+                        await ws.send_json({"type": "text_delta", "delta": GREETING_TEXT})
+                        await ws.send_json({"type": "stream_end"})
+                        # Greeting TTS
+                        await _send_tts(ws, GREETING_TEXT, current_voice, user_openai_client)
+                        await ws.send_json({"type": "tts_done"})
+                        continue
 
                 try:
                     msg = json.loads(raw)
@@ -1580,9 +1761,24 @@ async def websocket_endpoint(ws: WebSocket):
                     continue
 
                 if msg.get("type") == "set_model":
+                    old_model = current_model
                     current_model = msg["model"]
                     logger.info(f"Switched model to: {current_model}")
+                    # If switching away from realtime, close the realtime connection
+                    if is_realtime_model(old_model) and not is_realtime_model(current_model):
+                        await close_realtime()
                     await ws.send_json({"type": "model_changed", "model": current_model})
+                    continue
+
+                if msg.get("type") == "realtime_audio":
+                    # Forward PCM16 audio from browser to OpenAI Realtime API
+                    if realtime_ws and realtime_mode:
+                        audio_b64 = msg.get("audio", "")
+                        if audio_b64:
+                            await realtime_ws.send(json.dumps({
+                                "type": "input_audio_buffer.append",
+                                "audio": audio_b64,
+                            }))
                     continue
 
                 if msg.get("type") == "set_voice":
@@ -1598,11 +1794,21 @@ async def websocket_endpoint(ws: WebSocket):
                         chat_history[0] = {"role": "system", "content": current_persona_prompt}
                         logger.info(f"Switched persona to: {persona['name']}")
                         await ws.send_json({"type": "persona_changed", "name": persona["name"]})
+                        # Update realtime session instructions if in realtime mode
+                        if realtime_mode and realtime_ws:
+                            await realtime_ws.send(json.dumps({
+                                "type": "session.update",
+                                "session": {"instructions": current_persona_prompt},
+                            }))
                     continue
 
                 if msg.get("type") == "interrupt":
                     logger.info("User interrupt signal")
-                    await cancel_llm()
+                    if realtime_ws and realtime_mode:
+                        # Cancel any in-progress realtime response
+                        await realtime_ws.send(json.dumps({"type": "response.cancel"}))
+                    else:
+                        await cancel_llm()
                     await ws.send_json({"type": "ready"})
                     continue
 
@@ -1776,6 +1982,27 @@ async def websocket_endpoint(ws: WebSocket):
                 if not user_text:
                     continue
 
+                # In realtime mode, send text input to the Realtime API
+                if realtime_mode and realtime_ws:
+                    # Add text as a conversation item and trigger a response
+                    await realtime_ws.send(json.dumps({
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": user_text}],
+                        },
+                    }))
+                    await realtime_ws.send(json.dumps({
+                        "type": "response.create",
+                        "response": {"modalities": ["text", "audio"]},
+                    }))
+                    await ws.send_json({"type": "transcript", "role": "user", "content": user_text})
+                    if conversation_id:
+                        await add_message(conversation_id, "user", user_text)
+                        chat_history.append({"role": "user", "content": user_text})
+                    continue
+
                 # Cancel any running LLM stream — user is speaking
                 await cancel_llm()
 
@@ -1838,3 +2065,5 @@ async def websocket_endpoint(ws: WebSocket):
         logger.info("Client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
+    finally:
+        await close_realtime()
