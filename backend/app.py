@@ -987,30 +987,20 @@ OPENAI_TTS_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 
 
 async def _send_tts(ws, text, voice=None, openai_client_override=None):
-    """Generate audio and send with synced text. Text only shows when audio is ready."""
+    """Generate audio fast. Priority: edge-tts (fast) > OpenAI TTS > browser."""
     cleaned = clean_for_speech(text)
     if not cleaned or len(cleaned) < 2:
         return
     tts_voice = voice or TTS_VOICE
 
-    # Try OpenAI TTS first if user has a key (natural, fast)
-    if openai_client_override and tts_voice in OPENAI_TTS_VOICES:
-        try:
-            response = await openai_client_override.audio.speech.create(
-                model="tts-1", voice=tts_voice, input=cleaned,
-                response_format="mp3", speed=1.1,
-            )
-            audio_data = response.content
-            if audio_data:
-                b64 = base64.b64encode(audio_data).decode()
-                await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
-                return
-        except Exception as e:
-            logger.warning(f"OpenAI TTS failed: {e}")
-
-    # Try edge-tts (free neural voices)
+    # Always try Edge-TTS first — much faster (~300ms vs 2-3s for OpenAI)
+    # Map OpenAI voice names to edge-tts equivalents for speed
+    edge_voice = tts_voice
+    if tts_voice in OPENAI_TTS_VOICES:
+        edge_voice = {"alloy": "en-US-AriaNeural", "echo": "en-US-GuyNeural", "fable": "en-GB-SoniaNeural",
+                       "onyx": "en-US-DavisNeural", "nova": "en-US-JennyNeural", "shimmer": "en-US-AmberNeural"}.get(tts_voice, "en-US-AriaNeural")
     try:
-        comm = edge_tts.Communicate(cleaned, tts_voice)
+        comm = edge_tts.Communicate(cleaned, edge_voice)
         audio_data = b""
         async for chunk in comm.stream():
             if chunk["type"] == "audio":
@@ -1020,9 +1010,24 @@ async def _send_tts(ws, text, voice=None, openai_client_override=None):
             await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
             return
     except Exception as e:
-        logger.warning(f"Edge-TTS failed, falling back to browser: {e}")
+        logger.warning(f"Edge-TTS failed: {e}")
 
-    # Fallback to browser TTS
+    # Fallback: OpenAI TTS (slower but very high quality)
+    if openai_client_override and tts_voice in OPENAI_TTS_VOICES:
+        try:
+            response = await openai_client_override.audio.speech.create(
+                model="tts-1", voice=tts_voice, input=cleaned,
+                response_format="mp3", speed=1.15,
+            )
+            audio_data = response.content
+            if audio_data:
+                b64 = base64.b64encode(audio_data).decode()
+                await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
+                return
+        except Exception as e:
+            logger.warning(f"OpenAI TTS failed: {e}")
+
+    # Fallback to browser TTS (instant, no network)
     await ws.send_json({"type": "tts_chunk", "text": cleaned})
 
 
