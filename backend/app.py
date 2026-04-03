@@ -1039,6 +1039,19 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
     sentence_enders = {'.', '!', '?', '\n'}
     in_code_block = False
 
+    # TTS queue — generate audio in parallel with LLM streaming
+    tts_queue = asyncio.Queue()
+    async def tts_worker():
+        while True:
+            item = await tts_queue.get()
+            if item is None: break
+            try:
+                await _send_tts(ws, item, voice, tts_client)
+            except Exception:
+                pass
+            tts_queue.task_done()
+    tts_task = asyncio.create_task(tts_worker())
+
     try:
         # Signal start of streaming
         await ws.send_json({"type": "stream_start"})
@@ -1064,19 +1077,17 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
             if '```' in token:
                 in_code_block = not in_code_block
                 if in_code_block:
-                    # Flush TTS buffer before code
                     if tts_buffer.strip():
-                        await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
+                        await tts_queue.put(tts_buffer.strip())
                         chunk_count += 1
                     tts_buffer = ""
                 else:
-                    # Code block ended, add spoken hint
                     tts_buffer = " I've included the code in the chat. "
                 continue
 
             if in_code_block:
                 await ws.send_json({"type": "text_delta", "delta": token})
-                continue  # Don't add code to TTS buffer
+                continue
 
             tts_buffer += token
 
@@ -1084,40 +1095,32 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 parts = tts_buffer.split("[WAIT]")
                 before = parts[0].strip()
                 if before:
-                    await _send_tts(ws, before, voice, tts_client)
+                    await tts_queue.put(before)
                     chunk_count += 1
                 await ws.send_json({"type": "tts_done"})
                 tts_buffer = parts[1] if len(parts) > 1 else ""
                 continue
 
-            # First chunk: send fast (short). After that: collect more text to reduce gaps
-            min_chars = 10 if chunk_count == 0 else 60
+            # Break at sentence boundaries — send each sentence ASAP
             last_break = -1
             for i, ch in enumerate(tts_buffer):
-                if ch in sentence_enders and i >= min_chars:
+                if ch in sentence_enders and i >= 3:
                     last_break = i
                     break
 
-            # For first chunk, also break on comma for ultra-fast first response
-            if chunk_count == 0 and last_break < 0:
-                for i, ch in enumerate(tts_buffer):
-                    if ch in sentence_enders and i >= 5:
-                        last_break = i
-                        break
-                    elif ch == ',' and i > 8:
-                        last_break = i
-                        break
-
-            if last_break >= 0:
+            if last_break >= 3:
                 c = tts_buffer[:last_break + 1].strip()
                 tts_buffer = tts_buffer[last_break + 1:]
                 if c:
-                    await _send_tts(ws, c, voice, tts_client)
+                    await tts_queue.put(c)
                     chunk_count += 1
 
         # Flush remaining TTS buffer
         if tts_buffer.strip() and not (cancel_event and cancel_event.is_set()):
-            await _send_tts(ws, tts_buffer.strip(), voice, tts_client)
+            await tts_queue.put(tts_buffer.strip())
+        # Wait for all TTS to finish
+        await tts_queue.put(None)
+        await tts_task
         await ws.send_json({"type": "stream_end"})
         await ws.send_json({"type": "tts_done"})
     except Exception as e:
@@ -1200,22 +1203,13 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice, tts_client=No
                     tts_buffer = parts[1] if len(parts) > 1 else ""
                     continue
 
-                min_chars = 10 if chunk_count == 0 else 60
                 last_break = -1
                 for i, ch in enumerate(tts_buffer):
-                    if ch in sentence_enders and i >= min_chars:
+                    if ch in sentence_enders and i >= 3:
                         last_break = i
                         break
-                if chunk_count == 0 and last_break < 0:
-                    for i, ch in enumerate(tts_buffer):
-                        if ch in sentence_enders and i >= 5:
-                            last_break = i
-                            break
-                        elif ch == ',' and i > 8:
-                            last_break = i
-                            break
 
-                if last_break >= 0:
+                if last_break >= 3:
                     chunk = tts_buffer[:last_break + 1].strip()
                     tts_buffer = tts_buffer[last_break + 1:]
                     if chunk:
@@ -1287,22 +1281,13 @@ async def _stream_anthropic(messages, ws, model, cancel_event, voice, api_key, t
                     tts_buffer = parts[1] if len(parts) > 1 else ""
                     continue
 
-                min_chars = 10 if chunk_count == 0 else 60
                 last_break = -1
                 for i, ch in enumerate(tts_buffer):
-                    if ch in sentence_enders and i >= min_chars:
+                    if ch in sentence_enders and i >= 3:
                         last_break = i
                         break
-                if chunk_count == 0 and last_break < 0:
-                    for i, ch in enumerate(tts_buffer):
-                        if ch in sentence_enders and i >= 5:
-                            last_break = i
-                            break
-                        elif ch == ',' and i > 8:
-                            last_break = i
-                            break
 
-                if last_break >= 0:
+                if last_break >= 3:
                     c = tts_buffer[:last_break + 1].strip()
                     tts_buffer = tts_buffer[last_break + 1:]
                     if c:
