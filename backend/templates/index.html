@@ -10,11 +10,13 @@
         :root{--bg:#0a0a0f;--bg-elev:#0d0d14;--surface:#1a1a2e;--surface-hover:#1f1f35;--border:#2a2a3e;--input-bg:#111;--status-bg:#111118;--panel-bg:#12121a;--card-bg:#16161e;--text:#e0e0e0;--text2:#ccc;--text3:#aaa;--text4:#888;--text5:#666;--text6:#555;--text7:#444;--text8:#333;--overlay-dark:rgba(0,0,0,.7);--overlay-darker:rgba(0,0,0,.85);--overlay-mid:rgba(0,0,0,.5);--code-bg:#0d1117;--code-hdr:#161b22;--code-border:#30363d;--code-text:#e6edf3;--code-meta:#8b949e}
         html[data-theme="light"]{--bg:#f4f4fa;--bg-elev:#ebebf5;--surface:#e0e0f0;--surface-hover:#d4d4ec;--border:#b8b8d0;--input-bg:#fff;--status-bg:#eeeef8;--panel-bg:#f8f8ff;--card-bg:#fff;--text:#1a1a2e;--text2:#2a2a40;--text3:#4a4a5e;--text4:#606075;--text5:#77778a;--text6:#888898;--text7:#aaaabc;--text8:#bbbbca;--overlay-dark:rgba(0,0,0,.4);--overlay-darker:rgba(0,0,0,.55);--overlay-mid:rgba(0,0,0,.2);--code-bg:#f6f8fa;--code-hdr:#eef0f3;--code-border:#d0d7de;--code-text:#24292f;--code-meta:#57606a}
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+        body::before{content:'';position:fixed;top:-50%;right:-50%;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(139,92,246,.06) 0%,transparent 70%);pointer-events:none;z-index:0}
+        body::after{content:'';position:fixed;bottom:-30%;left:-30%;width:80%;height:80%;background:radial-gradient(ellipse at center,rgba(79,70,229,.04) 0%,transparent 60%);pointer-events:none;z-index:0}
 
         /* Header */
-        .header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--surface);background:var(--bg-elev);gap:10px;flex-wrap:wrap}
+        .header{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid rgba(139,92,246,.1);background:linear-gradient(180deg,var(--bg-elev) 0%,transparent 100%);gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
         .header-left{display:flex;align-items:center;gap:10px}
-        .header h1{font-size:16px;font-weight:600;color:#8b5cf6}
+        .header h1{font-size:16px;font-weight:700;background:linear-gradient(135deg,#a78bfa,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
         .header-right{display:flex;align-items:center;gap:8px}
         .badge{font-size:11px;padding:3px 10px;border-radius:10px;background:var(--surface);color:var(--text5)}
         .badge.on{background:#0a2e1a;color:#4ade80}
@@ -28,13 +30,14 @@
         .chat-container{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
         .chat-container::-webkit-scrollbar{width:5px}
         .chat-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-        .message{max-width:75%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.45;animation:fadeIn .25s ease}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        .message.user{align-self:flex-end;background:#8b5cf6;color:#fff;border-bottom-right-radius:4px}
-        .message.assistant{align-self:flex-start;background:var(--surface);color:var(--text);border-bottom-left-radius:4px}
+        .message{max-width:72%;padding:12px 16px;border-radius:16px;font-size:14px;line-height:1.5;animation:fadeIn .3s ease}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+        .message.user{align-self:flex-end;background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;border-bottom-right-radius:4px;box-shadow:0 2px 12px rgba(139,92,246,.2)}
+        .message.assistant{align-self:flex-start;background:var(--surface);color:var(--text);border-bottom-left-radius:4px;border:1px solid var(--border)}
         .message .rl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;opacity:.5;margin-bottom:3px}
         .status-msg{align-self:center;font-size:12px;color:var(--text6);padding:4px 14px;background:var(--status-bg);border-radius:16px}
-        .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text7);gap:8px;font-size:14px}
+        .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text6);gap:6px;font-size:14px;letter-spacing:.2px}
+        .empty-state .empty-icon{font-size:28px;margin-bottom:4px;opacity:.5}
 
         /* Code blocks */
         .message pre{background:var(--code-bg);border:1px solid var(--code-border);border-radius:8px;padding:12px;margin:8px 0;overflow-x:auto;font-size:13px;line-height:1.5}
@@ -84,28 +87,67 @@
         @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 
         /* Controls */
-        .controls{padding:16px 20px;display:flex;flex-direction:column;align-items:center;gap:10px;border-top:1px solid var(--surface);background:var(--bg-elev)}
+        .controls{padding:20px 20px 16px;display:flex;flex-direction:column;align-items:center;gap:12px;background:transparent;border:none}
 
-        /* Waveform Orb */
-        .orb-wrap{position:relative;width:200px;height:200px;display:flex;align-items:center;justify-content:center}
-        canvas.waveform{position:absolute;width:200px;height:200px;pointer-events:none}
-        .orb-btn{width:72px;height:72px;border-radius:50%;border:none;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .3s;position:relative;z-index:2;box-shadow:0 4px 20px rgba(139,92,246,.3)}
-        .orb-btn:hover{transform:scale(1.05)}
-        .orb-btn svg{width:28px;height:28px}
-        .orb-btn:disabled{background:#333;box-shadow:none;cursor:not-allowed;transform:none}
-        .orb-btn.listening{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 4px 20px rgba(16,185,129,.4)}
-        .orb-btn.user-speaking{background:linear-gradient(135deg,#22c55e,#16a34a);box-shadow:0 4px 28px rgba(34,197,94,.5)}
-        .orb-btn.processing{background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 4px 20px rgba(245,158,11,.3);pointer-events:none}
-        .orb-btn.ai-speaking{background:linear-gradient(135deg,#a78bfa,#7c3aed);box-shadow:0 4px 28px rgba(167,139,250,.5);pointer-events:none}
+        /* ---- Unique Orb ---- */
+        .orb-wrap{position:relative;width:220px;height:220px;display:flex;align-items:center;justify-content:center}
+        canvas.waveform{position:absolute;width:220px;height:220px;pointer-events:none;z-index:1;left:50%;top:50%;transform:translate(-50%,-50%)}
 
-        .hint{font-size:12px;color:var(--text6);text-align:center}.hint.on{color:#10b981}
-        .shortcuts{font-size:10px;color:var(--text8);text-align:center}
+        /* Outer glow rings */
+        .orb-wrap::before,.orb-wrap::after{content:'';position:absolute;border-radius:50%;pointer-events:none;animation:orb-ring-rotate 8s linear infinite}
+        .orb-wrap::before{width:180px;height:180px;border:1px solid rgba(139,92,246,.15);animation-duration:12s}
+        .orb-wrap::after{width:160px;height:160px;border:1px solid rgba(139,92,246,.08);animation-direction:reverse;animation-duration:8s}
+        @keyframes orb-ring-rotate{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+        /* Main orb button */
+        .orb-btn{width:90px;height:90px;border-radius:50%;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .4s cubic-bezier(.4,0,.2,1);position:relative;z-index:3;
+            background:radial-gradient(circle at 35% 35%,#a78bfa 0%,#8b5cf6 40%,#6d28d9 80%,#4c1d95 100%);
+            box-shadow:0 0 30px rgba(139,92,246,.4),0 0 60px rgba(139,92,246,.15),inset 0 -4px 12px rgba(0,0,0,.3),inset 0 4px 12px rgba(255,255,255,.1)}
+        .orb-btn:hover{transform:scale(1.08);box-shadow:0 0 40px rgba(139,92,246,.5),0 0 80px rgba(139,92,246,.2),inset 0 -4px 12px rgba(0,0,0,.3),inset 0 4px 12px rgba(255,255,255,.15)}
+        .orb-btn svg{width:32px;height:32px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+        .orb-btn:disabled{background:radial-gradient(circle at 35% 35%,#444 0%,#333 50%,#222 100%);box-shadow:0 0 10px rgba(0,0,0,.3);cursor:not-allowed;transform:none}
+
+        /* Breathing animation for idle */
+        .orb-btn.idle{animation:orb-breathe 3s ease-in-out infinite}
+        @keyframes orb-breathe{0%,100%{transform:scale(1);box-shadow:0 0 30px rgba(139,92,246,.4),0 0 60px rgba(139,92,246,.15)}50%{transform:scale(1.04);box-shadow:0 0 40px rgba(139,92,246,.5),0 0 80px rgba(139,92,246,.2)}}
+
+        /* Listening — calm teal */
+        .orb-btn.listening{
+            background:radial-gradient(circle at 35% 35%,#5eead4 0%,#14b8a6 40%,#0d9488 80%,#0f766e 100%);
+            box-shadow:0 0 30px rgba(20,184,166,.5),0 0 60px rgba(20,184,166,.2),inset 0 -4px 12px rgba(0,0,0,.3),inset 0 4px 12px rgba(255,255,255,.1);
+            animation:orb-pulse-teal 2s ease-in-out infinite}
+        @keyframes orb-pulse-teal{0%,100%{box-shadow:0 0 30px rgba(20,184,166,.5),0 0 60px rgba(20,184,166,.2)}50%{box-shadow:0 0 50px rgba(20,184,166,.6),0 0 100px rgba(20,184,166,.3)}}
+
+        /* User speaking — vibrant green with energy */
+        .orb-btn.user-speaking{
+            background:radial-gradient(circle at 35% 35%,#86efac 0%,#22c55e 40%,#16a34a 80%,#15803d 100%);
+            box-shadow:0 0 40px rgba(34,197,94,.6),0 0 80px rgba(34,197,94,.25),inset 0 -4px 12px rgba(0,0,0,.3),inset 0 4px 12px rgba(255,255,255,.15);
+            animation:orb-speak 0.5s ease-in-out infinite alternate}
+        @keyframes orb-speak{from{transform:scale(1)}to{transform:scale(1.06)}}
+
+        /* Processing — warm amber spin */
+        .orb-btn.processing{
+            background:radial-gradient(circle at 35% 35%,#fde68a 0%,#f59e0b 40%,#d97706 80%,#b45309 100%);
+            box-shadow:0 0 35px rgba(245,158,11,.5),0 0 70px rgba(245,158,11,.2),inset 0 -4px 12px rgba(0,0,0,.3),inset 0 4px 12px rgba(255,255,255,.1);
+            pointer-events:none;animation:orb-process 1.5s linear infinite}
+        @keyframes orb-process{from{transform:rotate(0deg) scale(1)}50%{transform:rotate(180deg) scale(1.03)}to{transform:rotate(360deg) scale(1)}}
+
+        /* AI speaking — ethereal purple glow */
+        .orb-btn.ai-speaking{
+            background:radial-gradient(circle at 35% 35%,#ddd6fe 0%,#a78bfa 30%,#8b5cf6 60%,#6d28d9 100%);
+            box-shadow:0 0 50px rgba(167,139,250,.6),0 0 100px rgba(139,92,246,.3),0 0 150px rgba(109,40,217,.1),inset 0 -4px 12px rgba(0,0,0,.2),inset 0 4px 12px rgba(255,255,255,.2);
+            pointer-events:none;animation:orb-ai-glow 1.2s ease-in-out infinite alternate}
+        @keyframes orb-ai-glow{from{box-shadow:0 0 50px rgba(167,139,250,.6),0 0 100px rgba(139,92,246,.3),0 0 150px rgba(109,40,217,.1)}to{box-shadow:0 0 60px rgba(167,139,250,.7),0 0 120px rgba(139,92,246,.4),0 0 180px rgba(109,40,217,.15)}}
+
+        .hint{font-size:12px;color:var(--text6);text-align:center}.hint.on{color:#14b8a6}
+        .shortcuts{font-size:10px;color:var(--text8);text-align:center;letter-spacing:.3px}
 
         /* Text Input */
         .text-input-bar{display:flex;gap:8px;width:100%;max-width:600px}
-        .text-input-bar input{flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:20px;font-size:14px;outline:none}
-        .text-input-bar input:focus{border-color:#8b5cf6}
-        .text-input-bar button{background:#8b5cf6;color:#fff;border:none;padding:10px 18px;border-radius:20px;cursor:pointer;font-size:13px}
+        .text-input-bar input{flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:10px 16px;border-radius:24px;font-size:14px;outline:none;transition:border .2s}
+        .text-input-bar input:focus{border-color:#8b5cf6;box-shadow:0 0 0 2px rgba(139,92,246,.15)}
+        .text-input-bar button{background:linear-gradient(135deg,#8b5cf6,#7c3aed);color:#fff;border:none;padding:10px 20px;border-radius:24px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
+        .text-input-bar button:hover{transform:scale(1.02);box-shadow:0 4px 12px rgba(139,92,246,.3)}
 
         /* Settings Panel */
         .settings-overlay{position:fixed;inset:0;background:var(--overlay-dark);z-index:80;display:none}
@@ -472,7 +514,7 @@
     <!-- Controls -->
     <div class="controls">
         <div class="orb-wrap">
-            <canvas class="waveform" id="waveCanvas" width="400" height="400"></canvas>
+            <canvas class="waveform" id="waveCanvas" width="440" height="440"></canvas>
             <button class="orb-btn" id="orbBtn" disabled onclick="toggleConvo()">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
             </button>
@@ -1067,76 +1109,113 @@
     // ---- Waveform Visualizer ----
     let smoothData=new Float32Array(64); // smoothed frequency data
 
+    let waveAngle=0; // rotation for wave animation
     function drawWave(){
         requestAnimationFrame(drawWave);
-        const w=waveCanvas.width, h=waveCanvas.height, cx=w/2, cy=h/2, r=80;
+        const w=waveCanvas.width, h=waveCanvas.height, cx=w/2, cy=h/2, r=88;
         wCtx.clearRect(0,0,w,h);
+
+        const time=Date.now()*0.001;
+        waveAngle+=0.003;
+
+        const colors={
+            idle:['#8b5cf6','#6d28d9','rgba(139,92,246,'],
+            listening:['#14b8a6','#0d9488','rgba(20,184,166,'],
+            'user-speaking':['#22c55e','#16a34a','rgba(34,197,94,'],
+            processing:['#f59e0b','#d97706','rgba(245,158,11,'],
+            'ai-speaking':['#a78bfa','#7c3aed','rgba(167,139,250,']
+        };
+        const [c1,c2,cRgba]=colors[orbState]||colors.idle;
+
+        // Always draw ambient ring (even when idle)
+        wCtx.save();
+        wCtx.beginPath();
+        for(let i=0;i<=360;i++){
+            const a=(i*Math.PI/180)+waveAngle;
+            const wobble=Math.sin(a*3+time*2)*2+Math.sin(a*5+time*3)*1.5;
+            const rr=r+wobble;
+            const x=cx+Math.cos(a)*rr;
+            const y=cy+Math.sin(a)*rr;
+            if(i===0)wCtx.moveTo(x,y);else wCtx.lineTo(x,y);
+        }
+        wCtx.closePath();
+        wCtx.strokeStyle=cRgba+'0.15)';
+        wCtx.lineWidth=1;
+        wCtx.stroke();
+        wCtx.restore();
+
         if(!analyser||!isActive)return;
 
         const bufLen=analyser.frequencyBinCount;
         const rawData=new Uint8Array(bufLen);
         analyser.getByteFrequencyData(rawData);
+        const bars=72;
 
-        const colors={
-            idle:['#555','#333'],
-            listening:['#10b981','#059669'],
-            'user-speaking':['#22c55e','#16a34a'],
-            processing:['#f59e0b','#d97706'],
-            'ai-speaking':['#a78bfa','#7c3aed']
-        };
-        const [color1,color2]=colors[orbState]||colors.idle;
-        const bars=64;
-
-        // Smooth the data for fluid animation
         for(let i=0;i<bars;i++){
             const idx=Math.floor((i/bars)*bufLen);
             const target=rawData[idx]/255;
-            smoothData[i]+=(target-smoothData[i])*0.3;
+            smoothData[i]+=(target-smoothData[i])*0.25;
         }
 
-        // Outer glow ring
-        wCtx.save();
         const avgVal=smoothData.reduce((a,b)=>a+b,0)/bars;
-        const glowR=r+8+avgVal*35;
-        const glow=wCtx.createRadialGradient(cx,cy,r,cx,cy,glowR);
-        glow.addColorStop(0,color1+'40');
-        glow.addColorStop(1,color1+'00');
+
+        // Outer nebula glow
+        wCtx.save();
+        const glowR=r+15+avgVal*50;
+        const glow=wCtx.createRadialGradient(cx,cy,r*0.8,cx,cy,glowR);
+        glow.addColorStop(0,cRgba+'0.25)');
+        glow.addColorStop(0.5,cRgba+'0.08)');
+        glow.addColorStop(1,cRgba+'0)');
         wCtx.beginPath();wCtx.arc(cx,cy,glowR,0,Math.PI*2);
         wCtx.fillStyle=glow;wCtx.fill();
         wCtx.restore();
 
-        // Draw bars
-        for(let i=0;i<bars;i++){
-            const angle=(i/bars)*Math.PI*2 - Math.PI/2;
-            const val=smoothData[i];
-            const barH=5 + val*45;
-            const gap=4;
-            const x1=cx+Math.cos(angle)*(r+gap);
-            const y1=cy+Math.sin(angle)*(r+gap);
-            const x2=cx+Math.cos(angle)*(r+gap+barH);
-            const y2=cy+Math.sin(angle)*(r+gap+barH);
-
-            // Bar gradient
-            const grad=wCtx.createLinearGradient(x1,y1,x2,y2);
-            grad.addColorStop(0,color1);
-            grad.addColorStop(1,color2+'88');
-
-            wCtx.beginPath();
-            wCtx.moveTo(x1,y1);
-            wCtx.lineTo(x2,y2);
-            wCtx.strokeStyle=grad;
-            wCtx.lineWidth=3.5;
-            wCtx.lineCap='round';
-            wCtx.globalAlpha=0.6+val*0.4;
-            wCtx.stroke();
-            wCtx.globalAlpha=1;
-        }
-
-        // Inner subtle ring
+        // Morphing wave ring
+        wCtx.save();
         wCtx.beginPath();
-        wCtx.arc(cx,cy,r+2,0,Math.PI*2);
-        wCtx.strokeStyle=color1+'30';
-        wCtx.lineWidth=1.5;
+        for(let i=0;i<=bars;i++){
+            const angle=(i/bars)*Math.PI*2 - Math.PI/2 + waveAngle;
+            const val=smoothData[i%bars];
+            const wave=r + 6 + val*35 + Math.sin(angle*4+time*3)*3;
+            const x=cx+Math.cos(angle)*wave;
+            const y=cy+Math.sin(angle)*wave;
+            if(i===0)wCtx.moveTo(x,y);else wCtx.lineTo(x,y);
+        }
+        wCtx.closePath();
+        const waveGrad=wCtx.createRadialGradient(cx,cy,r,cx,cy,r+50);
+        waveGrad.addColorStop(0,c1+'cc');
+        waveGrad.addColorStop(1,c2+'33');
+        wCtx.fillStyle=waveGrad;
+        wCtx.globalAlpha=0.3+avgVal*0.4;
+        wCtx.fill();
+        wCtx.strokeStyle=c1;
+        wCtx.lineWidth=2;
+        wCtx.globalAlpha=0.5+avgVal*0.5;
+        wCtx.stroke();
+        wCtx.restore();
+
+        // Particle dots around the orb
+        wCtx.save();
+        for(let i=0;i<bars;i+=3){
+            const angle=(i/bars)*Math.PI*2 + waveAngle*2;
+            const val=smoothData[i];
+            if(val<0.1)continue;
+            const dist=r+12+val*40;
+            const x=cx+Math.cos(angle)*dist;
+            const y=cy+Math.sin(angle)*dist;
+            const size=1.5+val*3;
+            wCtx.beginPath();wCtx.arc(x,y,size,0,Math.PI*2);
+            wCtx.fillStyle=c1;
+            wCtx.globalAlpha=0.3+val*0.7;
+            wCtx.fill();
+        }
+        wCtx.restore();
+
+        // Inner ring
+        wCtx.beginPath();
+        wCtx.arc(cx,cy,r-2,0,Math.PI*2);
+        wCtx.strokeStyle=cRgba+'0.12)';
+        wCtx.lineWidth=1;
         wCtx.stroke();
     }
 
@@ -1510,7 +1589,7 @@
         if(!confirm('Delete ALL conversations? This cannot be undone.'))return;
         await authFetch('/api/conversations',{method:'DELETE'});
         convId=null;
-        chatBox.innerHTML='<div class="empty-state" id="emptyState"><div style="font-size:36px;opacity:.3">&#127908;</div><p>Real-time voice conversation</p></div>';
+        chatBox.innerHTML='<div class="empty-state" id="emptyState"><div class="empty-icon">&#10024;</div><p style="font-weight:600;color:var(--text4)">Real-time voice conversation</p><p style="font-size:12px;color:var(--text7)">Click the orb or press Space to start</p></div>';
         loadConvList();
         toggleSettings();
     }
@@ -1622,7 +1701,7 @@
             toggleSidebar();
         }catch(e){}
     }
-    function newConversation(){convId=null;chatBox.innerHTML='<div class="empty-state" id="emptyState"><div style="font-size:36px;opacity:.3">&#127908;</div><p>Real-time voice conversation</p></div>';if(isActive)stopConvo();if(ws)ws.close();connectWS();toggleSidebar()}
+    function newConversation(){convId=null;chatBox.innerHTML='<div class="empty-state" id="emptyState"><div class="empty-icon">&#10024;</div><p style="font-weight:600;color:var(--text4)">Real-time voice conversation</p><p style="font-size:12px;color:var(--text7)">Click the orb or press Space to start</p></div>';if(isActive)stopConvo();if(ws)ws.close();connectWS();toggleSidebar()}
     // ---- Theme ----
     function updateThemeBtn(t){const b=document.getElementById('themeToggle');if(b)b.textContent=t==='light'?'\u{1F319}':'\u2600\uFE0F'}
     function toggleTheme(){const l=document.documentElement.getAttribute('data-theme')==='light';const n=l?'dark':'light';n==='light'?document.documentElement.setAttribute('data-theme','light'):document.documentElement.removeAttribute('data-theme');localStorage.setItem('theme',n);updateThemeBtn(n)}
