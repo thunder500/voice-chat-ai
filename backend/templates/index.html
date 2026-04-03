@@ -1479,11 +1479,6 @@
         isSpeechPlaying=true;
         const item=audioQueue.shift();
 
-        // Show synced text when audio starts playing
-        if(item.text){
-            appendStreamDelta(item.text);
-        }
-
         if(item.audio){
             const blob=b64toBlob(item.audio,'audio/mpeg');
             const url=URL.createObjectURL(blob);

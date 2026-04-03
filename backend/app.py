@@ -646,6 +646,7 @@ async def list_models(request: Request):
     if has_anthropic:
         models.extend([
             {"name": "claude-sonnet-4-20250514", "size": 0, "provider": "anthropic"},
+            {"name": "claude-3-5-sonnet-20241022", "size": 0, "provider": "anthropic"},
             {"name": "claude-3-5-haiku-20241022", "size": 0, "provider": "anthropic"},
         ])
 
@@ -1024,7 +1025,7 @@ async def _send_tts(ws, text, voice=None, openai_client_override=None):
             audio_data = response.content
             if audio_data:
                 b64 = base64.b64encode(audio_data).decode()
-                await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
+                await ws.send_json({"type": "tts_audio", "audio": b64})
                 return
         except Exception as e:
             logger.warning(f"OpenAI TTS failed: {e}")
@@ -1049,8 +1050,12 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
             if item is None: break
             try:
                 await _send_tts(ws, item, voice, tts_client)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"TTS failed for chunk, using browser fallback: {e}")
+                try:
+                    await ws.send_json({"type": "tts_chunk", "text": item})
+                except Exception:
+                    pass
             tts_queue.task_done()
     tts_task = asyncio.create_task(tts_worker())
 
@@ -1072,8 +1077,8 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
             token = delta.content
             full_response += token
 
-            # Only send text_delta for code blocks (not spoken text)
-            # Spoken text will be synced with audio via tts_audio message
+            # Send text to frontend immediately (for all content)
+            await ws.send_json({"type": "text_delta", "delta": token})
 
             # Track code blocks for TTS (don't read code)
             if '```' in token:
@@ -2069,6 +2074,9 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        if "disconnect" in str(e).lower() or "receive" in str(e).lower():
+            logger.info("Client disconnected (unclean)")
+        else:
+            logger.error(f"WebSocket error: {e}")
     finally:
         await close_realtime()
