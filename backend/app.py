@@ -998,7 +998,7 @@ async def _send_tts(ws, text, voice=None, openai_client_override=None):
         try:
             response = await openai_client_override.audio.speech.create(
                 model="tts-1", voice=tts_voice, input=cleaned,
-                response_format="mp3", speed=1.0,
+                response_format="mp3", speed=1.1,
             )
             audio_data = response.content
             if audio_data:
@@ -1084,13 +1084,16 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 tts_buffer = parts[1] if len(parts) > 1 else ""
                 continue
 
-            min_len = 3 if chunk_count == 0 else 5
+            min_len = 2 if chunk_count == 0 else 3
             last_break = -1
             for i, ch in enumerate(tts_buffer):
                 if ch in sentence_enders and i >= min_len:
                     last_break = i
                     break
-                elif ch == ',' and i > 12:
+                elif ch == ',' and i > 8:
+                    last_break = i
+                    break
+                elif ch == ':' and i > 6:
                     last_break = i
                     break
 
@@ -1186,7 +1189,7 @@ async def _stream_ollama(messages, ws, model, cancel_event, voice, tts_client=No
                     tts_buffer = parts[1] if len(parts) > 1 else ""
                     continue
 
-                min_len = 3 if chunk_count == 0 else 5
+                min_len = 2 if chunk_count == 0 else 3
                 last_break = -1
                 for i, ch in enumerate(tts_buffer):
                     if ch in sentence_enders and i >= min_len:
@@ -1268,7 +1271,7 @@ async def _stream_anthropic(messages, ws, model, cancel_event, voice, api_key, t
                     tts_buffer = parts[1] if len(parts) > 1 else ""
                     continue
 
-                min_len = 3 if chunk_count == 0 else 5
+                min_len = 2 if chunk_count == 0 else 3
                 last_break = -1
                 for i, ch in enumerate(tts_buffer):
                     if ch in sentence_enders and i >= min_len:
@@ -1556,7 +1559,11 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "conversation_id", "id": conversation_id})
                     await add_message(conversation_id, "assistant", GREETING_TEXT)
                     chat_history.append({"role": "assistant", "content": GREETING_TEXT})
-                    # Greeting with edge-tts natural voice
+                    # Show greeting text in chat
+                    await ws.send_json({"type": "stream_start"})
+                    await ws.send_json({"type": "text_delta", "delta": GREETING_TEXT})
+                    await ws.send_json({"type": "stream_end"})
+                    # Greeting TTS
                     await _send_tts(ws, GREETING_TEXT, current_voice, user_openai_client)
                     await ws.send_json({"type": "tts_done"})
                     continue
