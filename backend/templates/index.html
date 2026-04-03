@@ -1337,21 +1337,26 @@
         isSpeechPlaying=true;
         const item=audioQueue.shift();
 
+        // Show synced text when audio starts playing
+        if(item.text){
+            appendStreamDelta(item.text);
+        }
+
         if(item.audio){
-            // Play neural audio (mp3 from edge-tts)
             const blob=b64toBlob(item.audio,'audio/mpeg');
             const url=URL.createObjectURL(blob);
             currentAudio=new Audio(url);
-            currentAudio.playbackRate=1.1; // slightly faster for conversational pace
+            currentAudio.playbackRate=1.1;
             currentAudio.onended=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextAudio()};
             currentAudio.onerror=()=>{URL.revokeObjectURL(url);currentAudio=null;playNextAudio()};
             currentAudio.play().catch(()=>playNextAudio());
-        } else {
-            // Fallback: browser speechSynthesis
+        } else if(item.text) {
             const u=new SpeechSynthesisUtterance(item.text);
             u.rate=1.15;u.pitch=1.05;if(selectedVoice)u.voice=selectedVoice;
             u.onend=()=>playNextAudio();u.onerror=()=>playNextAudio();
             speechSynthesis.speak(u);
+        } else {
+            playNextAudio();
         }
     }
 

@@ -987,7 +987,7 @@ OPENAI_TTS_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 
 
 async def _send_tts(ws, text, voice=None, openai_client_override=None):
-    """Generate audio: OpenAI TTS > edge-tts > browser TTS."""
+    """Generate audio and send with synced text. Text only shows when audio is ready."""
     cleaned = clean_for_speech(text)
     if not cleaned or len(cleaned) < 2:
         return
@@ -1003,7 +1003,7 @@ async def _send_tts(ws, text, voice=None, openai_client_override=None):
             audio_data = response.content
             if audio_data:
                 b64 = base64.b64encode(audio_data).decode()
-                await ws.send_json({"type": "tts_audio", "audio": b64})
+                await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
                 return
         except Exception as e:
             logger.warning(f"OpenAI TTS failed: {e}")
@@ -1017,7 +1017,7 @@ async def _send_tts(ws, text, voice=None, openai_client_override=None):
                 audio_data += chunk["data"]
         if audio_data:
             b64 = base64.b64encode(audio_data).decode()
-            await ws.send_json({"type": "tts_audio", "audio": b64})
+            await ws.send_json({"type": "tts_audio", "audio": b64, "text": text})
             return
     except Exception as e:
         logger.warning(f"Edge-TTS failed, falling back to browser: {e}")
@@ -1052,8 +1052,8 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
             token = delta.content
             full_response += token
 
-            # Send each token for typing animation
-            await ws.send_json({"type": "text_delta", "delta": token})
+            # Only send text_delta for code blocks (not spoken text)
+            # Spoken text will be synced with audio via tts_audio message
 
             # Track code blocks for TTS (don't read code)
             if '```' in token:
@@ -1070,6 +1070,7 @@ async def _stream_openai(messages, ws, model, cancel_event, voice, client: Async
                 continue
 
             if in_code_block:
+                await ws.send_json({"type": "text_delta", "delta": token})
                 continue  # Don't add code to TTS buffer
 
             tts_buffer += token
