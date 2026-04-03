@@ -579,11 +579,19 @@
                 updateUserMenu();
                 loadConversations(); loadModels(); loadVoices(); loadPersonas();
                 if(ws) ws.close(); connectWS();
+                // Update URL to /app if on /login or /register
+                if(window.location.pathname==='/login'||window.location.pathname==='/register'){
+                    window.history.replaceState(null,'','./app');
+                }
             } else { showAuthOverlay(); }
         } catch { showAuthOverlay(); }
     }
 
-    function showAuthOverlay() { document.getElementById('authOverlay').classList.remove('hidden'); }
+    function showAuthOverlay() {
+        // If on /app, redirect to landing page
+        if(window.location.pathname==='/app'){window.location.href='/';return}
+        document.getElementById('authOverlay').classList.remove('hidden');
+    }
     function hideAuthOverlay() { document.getElementById('authOverlay').classList.add('hidden'); }
 
     function showAuthTab(tab) {
